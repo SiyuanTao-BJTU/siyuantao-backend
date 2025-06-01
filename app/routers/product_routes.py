@@ -1,13 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status as fastapi_status
 from ..services.product_service import ProductService
 from ..dal.product_dal import ProductDAL
 from ..schemas.product import ProductCreate, ProductUpdate
 from ..dependencies import get_current_authenticated_user, get_current_active_admin_user, get_product_service, get_db_connection
 import pyodbc
-from fastapi import status as fastapi_status
 from typing import List, Optional
 import os # Import os for file operations
-from fastapi import UploadFile, File # Import UploadFile and File
+from app.schemas.user_schemas import UserResponseSchema # 添加导入
 from app.exceptions import NotFoundError, IntegrityError, DALError, ForbiddenError, PermissionError # Import specific exceptions
 import logging # Import logging
 import uuid # Import uuid for UUID conversion
@@ -20,7 +19,7 @@ router = APIRouter()
 
 @router.get("/favorites", status_code=fastapi_status.HTTP_200_OK)
 async def get_user_favorites(
-    user = Depends(get_current_authenticated_user),
+    user: dict = Depends(get_current_authenticated_user),
     product_service: ProductService = Depends(get_product_service),
     conn: pyodbc.Connection = Depends(get_db_connection)
 ):
@@ -38,7 +37,7 @@ async def get_user_favorites(
     Raises:
         HTTPException: 获取失败时返回相应的HTTP错误
     """
-    user_id = user.user_id # Directly access user_id
+    user_id = user['user_id'] # Changed to dictionary access
     try:
         favorites = await product_service.get_user_favorites(conn, user_id)
         return favorites
@@ -99,7 +98,7 @@ async def get_product_list(category_name: str = None, product_status: str = None
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
 @router.post("", status_code=fastapi_status.HTTP_201_CREATED)
-async def create_product(product: ProductCreate, user = Depends(get_current_authenticated_user),
+async def create_product(product: ProductCreate, user: dict = Depends(get_current_authenticated_user),
                           product_service: ProductService = Depends(get_product_service),
                           conn: pyodbc.Connection = Depends(get_db_connection)):
     """
@@ -117,104 +116,68 @@ async def create_product(product: ProductCreate, user = Depends(get_current_auth
     Raises:
         HTTPException: 创建失败时返回相应的HTTP错误
     """
-    owner_id = user["user_id"] # Directly access user_id from dict
-    try:
-        logger.info(f"Router: Creating product with: owner_id={owner_id}, category_name={product.category_name}, product_name={product.product_name}, description={product.description}, quantity={product.quantity}, price={product.price}, image_urls={product.image_urls}")
-        await product_service.create_product(conn, owner_id, product.category_name, product.product_name, 
-                                            product.description, product.quantity, product.price, product.image_urls)
-        logger.info(f"Router: Product created successfully")
-        return {"message": "商品创建成功"}
-    except (ValueError, IntegrityError, DALError) as e: # Group ValueError, IntegrityError, DALError for 400
-        logger.error(f"Error creating product: {e}")
-        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        log_owner_id = owner_id if owner_id is not None else "N/A"
-        logger.error(f"An unexpected error occurred while creating product for owner {log_owner_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+    return await product_service.create_product(conn, user['user_id'], product.category_name, product.product_name, 
+                                              product.description, product.quantity, product.price, product.image_urls)
 
-@router.put("/{product_id}")
+@router.put("/{product_id}", status_code=fastapi_status.HTTP_204_NO_CONTENT)
 async def update_product(
     product_id: UUID,
     product_update_data: ProductUpdate,
-    current_user = Depends(get_current_authenticated_user),
+    current_user: dict = Depends(get_current_authenticated_user), # Changed type hint to dict
     product_service: ProductService = Depends(get_product_service),
     conn: pyodbc.Connection = Depends(get_db_connection)
 ):
     """
-    更新商品信息
-    
-    Args:
-        product_id: 商品ID
-        product_update_data: 商品更新请求体 (ProductUpdate Schema)
-        current_user: 当前认证用户
-        product_service: 商品服务依赖
-        conn: 数据库连接
-    
-    Returns:
-        操作结果消息
-    
-    Raises:
-        HTTPException: 更新失败时返回相应的HTTP错误
+    Update a product by its ID. 
+    Users can update their own products. Admins can update any product.
     """
-    owner_id = current_user["user_id"] # Directly access user_id from dict
     try:
-        await product_service.update_product(conn, product_id, owner_id, product_update_data)
-        return {"message": "Product updated successfully"}
+        await product_service.update_product(conn, product_id, current_user, product_update_data)
+        # For HTTP 204, no content should be returned in the body.
+        # FastAPI handles this automatically if the status_code is 204 and no value is returned.
+        return 
     except NotFoundError as e:
-        logger.error(f"Error updating product {product_id}: {e}")
+        logger.error(f"Product not found for update: {product_id}, Error: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_404_NOT_FOUND, detail=str(e))
     except PermissionError as e:
         logger.error(f"Permission denied for updating product {product_id}: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_403_FORBIDDEN, detail=str(e))
-    except (ValueError, DALError) as e: # Group ValueError and DALError for 400
-        logger.error(f"Validation error updating product {product_id}: {e}")
-        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except DALError as e:
+        logger.error(f"DAL error during product update {product_id}: {e}")
+        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
     except Exception as e:
-        log_owner_id = owner_id if owner_id is not None else "N/A"
-        logger.error(f"An unexpected error occurred while updating product {product_id} for owner {log_owner_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+        logger.error(f"Unexpected error updating product {product_id}: {e}")
+        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"更新商品时发生意外错误: {e}")
 
-@router.delete("/{product_id}")
-async def delete_product(product_id: UUID, user = Depends(get_current_authenticated_user),
-                          product_service: ProductService = Depends(get_product_service),
-                          conn: pyodbc.Connection = Depends(get_db_connection)):
+@router.delete("/{product_id}", status_code=fastapi_status.HTTP_204_NO_CONTENT)
+async def delete_product(product_id: UUID, 
+                         current_user: dict = Depends(get_current_authenticated_user), # Changed type hint to dict
+                         product_service: ProductService = Depends(get_product_service),
+                         conn: pyodbc.Connection = Depends(get_db_connection)):
     """
-    删除商品
-    
-    Args:
-        product_id: 商品ID
-        user: 当前认证用户
-        product_service: 商品服务依赖
-        conn: 数据库连接
-    
-    Returns:
-        操作结果消息
-    
-    Raises:
-        HTTPException: 删除失败时返回相应的HTTP错误
+    删除商品。管理员可以删除任何商品，普通用户只能删除自己的商品。
     """
-    owner_id = user["user_id"] # Directly access user_id from dict
     try:
-        await product_service.delete_product(conn, product_id, owner_id)
-        return {"message": "商品删除成功"}
+        await product_service.delete_product(conn, product_id, current_user)
+        return # HTTP 204 No Content
     except NotFoundError as e:
         logger.error(f"Error deleting product {product_id}: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_404_NOT_FOUND, detail=str(e))
     except PermissionError as e:
         logger.error(f"Permission denied for deleting product {product_id}: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_403_FORBIDDEN, detail=str(e))
-    except (ValueError, DALError) as e: # Group ValueError and DALError for 400
+    except DALError as e: 
         logger.error(f"DAL Error deleting product {product_id}: {e}")
-        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=str(e))
+        # 将DALError具体化为500错误，因为SP的RAISERROR通常表示操作层面的问题，但这里DALError是通用包装
+        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
     except Exception as e:
-        log_owner_id = owner_id if owner_id is not None else "N/A"
-        logger.error(f"An unexpected error occurred while deleting product {product_id} for owner {log_owner_id}: {e}", exc_info=True)
+        logger.error(f"An unexpected error occurred while deleting product {product_id} by user {current_user['user_id']}: {e}", exc_info=True) # Changed to dictionary access
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
 @router.post("/batch/activate")
 async def batch_activate_products(
     request_data: dict,
-    admin = Depends(get_current_active_admin_user),
+    admin: dict = Depends(get_current_active_admin_user), # Changed type hint to dict
     product_service: ProductService = Depends(get_product_service),
     conn: pyodbc.Connection = Depends(get_db_connection)
 ):
@@ -233,7 +196,7 @@ async def batch_activate_products(
     Raises:
         HTTPException: 批量激活失败时返回相应的HTTP错误
     """
-    admin_id = admin["user_id"] # Directly access user_id from dict
+    admin_id = admin["user_id"] # Already correct
     try:
         product_ids_str = request_data.get("product_ids")
         if not product_ids_str or not isinstance(product_ids_str, list):
@@ -259,14 +222,13 @@ async def batch_activate_products(
         logger.error(f"Error during batch activation: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        log_admin_id = admin_id if admin_id is not None else "N/A"
-        logger.error(f"An unexpected error occurred while batch activating products for admin {log_admin_id}: {e}", exc_info=True)
+        logger.error(f"Unexpected error rejecting product by admin {admin['user_id'] if admin else 'N/A'}: {e}", exc_info=True) # Changed to dictionary access
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
 @router.post("/batch/reject")
 async def batch_reject_products(
     request_data: dict,
-    admin = Depends(get_current_active_admin_user),
+    admin: dict = Depends(get_current_active_admin_user), # Changed type hint to dict
     product_service: ProductService = Depends(get_product_service),
     conn: pyodbc.Connection = Depends(get_db_connection)
 ):
@@ -285,7 +247,7 @@ async def batch_reject_products(
     Raises:
         HTTPException: 批量拒绝失败时返回相应的HTTP错误
     """
-    admin_id = admin["user_id"] # Directly access user_id from dict
+    admin_id = admin["user_id"] # Already correct
     try:
         product_ids_str = request_data.get("product_ids")
         reason = request_data.get("reason") # Extract reason from request_data
@@ -317,7 +279,7 @@ async def batch_reject_products(
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
 @router.post("/{product_id}/favorite", status_code=fastapi_status.HTTP_201_CREATED)
-async def add_favorite(product_id: UUID, user = Depends(get_current_authenticated_user),
+async def add_favorite(product_id: UUID, user: dict = Depends(get_current_authenticated_user), # Changed type hint to dict
                        product_service: ProductService = Depends(get_product_service),
                        conn: pyodbc.Connection = Depends(get_db_connection)):
     """
@@ -335,7 +297,7 @@ async def add_favorite(product_id: UUID, user = Depends(get_current_authenticate
     Raises:
         HTTPException: 收藏失败时返回相应的HTTP错误
     """
-    user_id = user.user_id # Directly access user_id
+    user_id = user['user_id'] # Changed to dictionary access
     try:
         await product_service.add_favorite(conn, user_id, product_id) # 传入UUID类型
         return {"message": "商品收藏成功"}
@@ -354,7 +316,7 @@ async def add_favorite(product_id: UUID, user = Depends(get_current_authenticate
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
 @router.delete("/{product_id}/favorite", status_code=fastapi_status.HTTP_200_OK)
-async def remove_favorite(product_id: UUID, user = Depends(get_current_authenticated_user),
+async def remove_favorite(product_id: UUID, user: dict = Depends(get_current_authenticated_user), # Changed type hint to dict
                           product_service: ProductService = Depends(get_product_service),
                           conn: pyodbc.Connection = Depends(get_db_connection)):
     """
@@ -372,7 +334,7 @@ async def remove_favorite(product_id: UUID, user = Depends(get_current_authentic
     Raises:
         HTTPException: 移除失败时返回相应的HTTP错误
     """
-    user_id = user.user_id # Directly access user_id
+    user_id = user['user_id'] # Changed to dictionary access
     try:
         await product_service.remove_favorite(conn, user_id, product_id) # 传入UUID类型
         return {"message": "商品已成功从收藏列表中移除"}
@@ -421,7 +383,7 @@ async def get_product_detail(product_id: UUID,
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
 @router.put("/{product_id}/status/activate")
-async def activate_product(product_id: UUID, admin = Depends(get_current_active_admin_user),
+async def activate_product(product_id: UUID, admin: dict = Depends(get_current_active_admin_user), # Changed type hint to dict
                             product_service: ProductService = Depends(get_product_service),
                             conn: pyodbc.Connection = Depends(get_db_connection)):
     """
@@ -439,7 +401,7 @@ async def activate_product(product_id: UUID, admin = Depends(get_current_active_
     Raises:
         HTTPException: 激活失败时返回相应的HTTP错误
     """
-    admin_id = admin["user_id"] # Directly access user_id from dict
+    admin_id = admin["user_id"] # Already correct
     try:
         await product_service.activate_product(conn, product_id, admin_id) # 传入UUID类型
         return {"message": "商品已成功激活"}
@@ -459,7 +421,7 @@ async def activate_product(product_id: UUID, admin = Depends(get_current_active_
 
 @router.put("/{product_id}/status/reject")
 async def reject_product(product_id: UUID, request_data: dict,
-                            admin = Depends(get_current_active_admin_user),
+                            admin: dict = Depends(get_current_active_admin_user), # Changed type hint to dict
                             product_service: ProductService = Depends(get_product_service),
                             conn: pyodbc.Connection = Depends(get_db_connection)):
     """
@@ -478,7 +440,7 @@ async def reject_product(product_id: UUID, request_data: dict,
     Raises:
         HTTPException: 拒绝失败时返回相应的HTTP错误
     """
-    admin_id = admin["user_id"] # Directly access user_id from dict
+    admin_id = admin["user_id"] # Already correct
     try:
         reason = request_data.get("reason")
         if reason is None:
@@ -500,39 +462,26 @@ async def reject_product(product_id: UUID, request_data: dict,
         logger.error(f"An unexpected error occurred while rejecting product for admin {log_admin_id}: {e}", exc_info=True)
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.put("/{product_id}/status/withdraw")
-async def withdraw_product(product_id: UUID, user = Depends(get_current_authenticated_user),
-                            product_service: ProductService = Depends(get_product_service),
-                            conn: pyodbc.Connection = Depends(get_db_connection)):
+@router.put("/{product_id}/status/withdraw", status_code=fastapi_status.HTTP_204_NO_CONTENT)
+async def withdraw_product(product_id: UUID, 
+                           current_user: dict = Depends(get_current_authenticated_user), # Changed type hint to dict
+                           product_service: ProductService = Depends(get_product_service),
+                           conn: pyodbc.Connection = Depends(get_db_connection)):
     """
-    商品所有者下架商品
-    
-    Args:
-        product_id: 商品ID
-        user: 当前认证用户
-        product_service: 商品服务依赖
-        conn: 数据库连接
-    
-    Returns:
-        操作结果消息
-    
-    Raises:
-        HTTPException: 下架失败时返回相应的HTTP错误
+    下架商品。管理员可以下架任何商品，普通用户只能下架自己的商品。
     """
-    owner_id = user["user_id"] # Directly access user_id from dict
     try:
-        await product_service.withdraw_product(conn, product_id, owner_id)
-        return {"message": "商品已成功下架"}
+        await product_service.withdraw_product(conn, product_id, current_user)
+        return # HTTP 204 No Content
     except NotFoundError as e:
-        logger.error(f"Product with ID {product_id} not found for withdrawal: {e}")
+        logger.error(f"Error withdrawing product {product_id}: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_404_NOT_FOUND, detail=str(e))
     except PermissionError as e:
         logger.error(f"Permission denied for withdrawing product {product_id}: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_403_FORBIDDEN, detail=str(e))
-    except (ValueError, DALError) as e: # Group ValueError and DALError for 400
-        logger.error(f"Error withdrawing product {product_id}: {e}")
-        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except DALError as e:
+        logger.error(f"DAL Error withdrawing product {product_id}: {e}")
+        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
     except Exception as e:
-        log_owner_id = owner_id if owner_id is not None else "N/A"
-        logger.error(f"An unexpected error occurred while withdrawing product {product_id} for owner {log_owner_id}: {e}", exc_info=True)
+        logger.error(f"An unexpected error occurred while withdrawing product {product_id} by user {current_user['user_id']}: {e}", exc_info=True) # Changed to dictionary access
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")

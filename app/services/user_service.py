@@ -91,73 +91,41 @@ class UserService:
             raise e # Re-raise other unexpected errors
 
     async def authenticate_user_and_create_token(self, conn: pyodbc.Connection, password: str, username: Optional[str] = None, email: Optional[str] = None) -> str:
-        """
-        Service layer function to authenticate a user by username or email and generate a JWT token.
-        Calls DAL to get user, verifies password, checks status, and creates token.
-        """
-        logger.info(f"Attempting to authenticate user: username={username}, email={email}") # Add logging
-
-        user = None
         if username:
-             # 1a. Call DAL to get user with password hash by username
-             logger.debug(f"Calling DAL.get_user_by_username_with_password for username {username}") # Add logging
-             user = await self.user_dal.get_user_by_username_with_password(conn, username)
-             logger.debug(f"DAL.get_user_by_username_with_password returned: {user}") # Add logging
+            user_data = await self.user_dal.get_user_by_username_with_password(conn, username)
         elif email:
-             # 1b. Call DAL to get user with password hash by email
-             logger.debug(f"Calling DAL.get_user_by_email_with_password for email {email}") # Add logging
-             user = await self.user_dal.get_user_by_email_with_password(conn, email)
-             logger.debug(f"DAL.get_user_by_email_with_password returned: {user}") # Add logging
+            user_data = await self.user_dal.get_user_by_email_with_password(conn, email)
+        else:
+            raise ValueError("必须提供用户名或邮箱。")
 
-        if not user:
-            # User not found by either username or email
-            logger.warning(f"Authentication failed: User not found for username={username}, email={email}") # Add logging
+        if not user_data:
             raise AuthenticationError("用户名/邮箱或密码不正确")
 
-        # 2. Verify password
-        stored_password_hash = user.get('Password')
-        logger.debug(f"Verifying password for user: {username}") # Add logging
-        if not stored_password_hash or not verify_password(password, stored_password_hash):
-            # Password doesn't match
-            logger.warning(f"Authentication failed: Incorrect password for user {username}.") # Add logging
-            raise AuthenticationError("用户名或密码不正确")
+        if not verify_password(password, user_data['Password']):
+            raise AuthenticationError("用户名/邮箱或密码不正确")
 
-        # 3. Check user status (e.g., Disabled) - Business logic in Service
-        logger.debug(f"Checking status for user: {username} (Status: {user.get('Status')})") # Add logging
-        if user.get('Status') == 'Disabled':
-            logger.warning(f"Authentication failed: Account for user {username} is disabled.") # Add logging
-            raise ForbiddenError("账户已被禁用") # Raise a specific exception
+        user_id = UUID(str(user_data['UserID']))
+        is_staff = user_data.get("IsStaff", False)
+        is_verified = user_data.get("IsVerified", False)
+        
+        logger.debug(f"Checking status for user: {user_data['UserName']} (Status: {user_data['Status']})")
+        if user_data['Status'] != "Active":
+            raise AuthenticationError(f"用户 {user_data['UserName']} 账户已被禁用或不活跃。")
 
-        # TODO: Check if user is verified if verification is required for login
-        # if not user.get('IsVerified') and require_verification:
-        #     raise ForbiddenError("邮箱未验证，请先验证邮箱")
-
-        # 4. Create JWT Token
-        logger.debug(f"Creating JWT token for user: {username}") # Add logging
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        # Use user data (like UserID, IsStaff) to create the token payload
-        # Ensure UserID is correctly accessed from the user dict returned by DAL
-        user_id = user.get('UserID') # Assuming DAL returns 'UserID'
-        is_staff = user.get('IsStaff', False) # Assuming DAL returns 'IsStaff'
-        is_verified = user.get('IsVerified', False) # Assuming DAL returns 'IsVerified'
-        is_super_admin = user.get('IsSuperAdmin', False) # Get IsSuperAdmin from DAL result
 
-        if not user_id:
-             # This should not happen if DAL works correctly
-             logger.error(f"DAL error: UserID missing for {username} after fetching.") # Add logging
-             raise DALError("Failed to retrieve UserID for token creation after authentication.")
+        # 创建 JWT Token
+        payload = {
+            "sub": str(user_id), # JWT standard 'sub' field for user ID
+            "user_id": str(user_id), # Keep for backward compatibility if needed in some places
+            "is_staff": is_staff,
+            "is_verified": is_verified
+        }
+        logger.debug(f"Creating JWT token for user: {user_data['UserName']}")
+        access_token = create_access_token(payload, expires_delta=access_token_expires)
 
-        access_token = create_access_token(
-            data={
-                "user_id": str(user_id), # Ensure user_id is string in token
-                "is_staff": is_staff,
-                "is_verified": is_verified, # Include verification status in token
-                "is_super_admin": is_super_admin # Include super admin status in token
-            },
-            expires_delta=access_token_expires
-        )
-        logger.info(f"Authentication successful, token created for user: {username}") # Add logging
-        return access_token # Return the token string
+        logger.info(f"Authentication successful, token created for user: {user_data['UserName']}")
+        return access_token
 
     async def get_user_profile_by_id(self, conn: pyodbc.Connection, user_id: UUID) -> UserResponseSchema:
         """

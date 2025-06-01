@@ -92,12 +92,13 @@ BEGIN
     -- 新增：添加过滤条件（按 ownerId 或按 status 过滤）
     IF @ownerId IS NOT NULL
         SET @sql = @sql + ' AND p.OwnerID = @ownerId';
-    ELSE IF @status IS NOT NULL AND @status <> ''
-        -- 仅在 ownerId 为 NULL 且 status 提供时应用 status 过滤
+    ELSE IF @status IS NOT NULL AND @status <> '' AND @status <> '_FETCH_ALL_PRODUCTS_'
+        -- 仅在 ownerId 为 NULL 且 status 提供且不为特殊值时应用 status 过滤
         SET @sql = @sql + ' AND p.Status = @status';
-    ELSE
-        -- 如果 ownerId 和 status 都为 NULL/空，则默认只查询 'Active' 状态的商品
+    ELSE IF @status IS NULL OR @status = '' -- 如果 status 是 NULL 或空字符串 (且没有 ownerId)
+        -- 默认只查询 'Active' 状态的商品
         SET @sql = @sql + ' AND p.Status = ''Active''';
+    -- 如果 @status 是 '_FETCH_ALL_PRODUCTS_'，则不添加任何额外的状态过滤，获取所有商品
 
     IF @searchQuery IS NOT NULL AND @searchQuery <> ''
         SET @sql = @sql + ' AND (p.ProductName LIKE ''%'' + @searchQuery + ''%'' OR p.Description LIKE ''%'' + @searchQuery + ''%'')';
@@ -172,7 +173,8 @@ CREATE PROCEDURE [sp_UpdateProduct]
     @quantity INT = NULL,
     @price DECIMAL(10, 2) = NULL,
     @categoryName NVARCHAR(100) = NULL,
-    @condition NVARCHAR(50) = NULL -- 添加 condition 参数
+    @condition NVARCHAR(50) = NULL, -- 添加 condition 参数
+    @invokedByAdmin BIT = 0 -- 新增参数，标记是否由管理员调用
     -- 图片的增删改查通过独立的图片存储过程处理
 AS
 BEGIN
@@ -195,7 +197,7 @@ BEGIN
     END
 
     -- 检查操作用户是否是商品所有者 (控制流 IF)
-    IF @productOwnerId != @userId
+    IF @invokedByAdmin = 0 AND @productOwnerId != @userId -- 新的检查，如果不是管理员调用，则检查所有权
     BEGIN
         RAISERROR('无权修改此商品。', 16, 1);
         RETURN;
@@ -272,7 +274,8 @@ DROP PROCEDURE IF EXISTS [sp_DeleteProduct];
 GO
 CREATE PROCEDURE [sp_DeleteProduct]
     @productId UNIQUEIDENTIFIER,
-    @userId UNIQUEIDENTIFIER -- 卖家ID
+    @userId UNIQUEIDENTIFIER, -- 卖家ID 或 管理员ID
+    @invokedByAdmin BIT = 0 -- 新增参数，标记是否由管理员调用
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -280,7 +283,7 @@ BEGIN
 
     DECLARE @productOwnerId UNIQUEIDENTIFIER;
 
-    -- 检查商品是否存在且属于指定用户 (SQL语句1)
+    -- 检查商品是否存在 (SQL语句1)
     SELECT @productOwnerId = OwnerID FROM [Product] WHERE ProductID = @productId;
 
     -- 使用 IF 进行控制流
@@ -290,7 +293,8 @@ BEGIN
         RETURN;
     END
 
-    IF @productOwnerId != @userId
+    -- 如果不是管理员调用，则检查所有权
+    IF @invokedByAdmin = 0 AND @productOwnerId != @userId
     BEGIN
         RAISERROR('无权删除此商品，您不是该商品的发布者。', 16, 1);
         RETURN;
@@ -429,12 +433,13 @@ END;
 GO
 
 -- sp_WithdrawProduct: 卖家主动下架商品
--- 输入: @productId UNIQUEIDENTIFIER, @userId UNIQUEIDENTIFIER (卖家ID)
+-- 输入: @productId UNIQUEIDENTIFIER, @userId UNIQUEIDENTIFIER (卖家ID 或 管理员ID)
 DROP PROCEDURE IF EXISTS [sp_WithdrawProduct];
 GO
 CREATE PROCEDURE [sp_WithdrawProduct]
     @productId UNIQUEIDENTIFIER,
-    @userId UNIQUEIDENTIFIER
+    @userId UNIQUEIDENTIFIER,
+    @invokedByAdmin BIT = 0 -- 新增参数
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -442,7 +447,7 @@ BEGIN
     DECLARE @productOwnerId UNIQUEIDENTIFIER;
     DECLARE @currentStatus NVARCHAR(20);
 
-    -- 检查商品是否存在，是否属于该用户，以及当前状态是否允许下架 (SQL语句1)
+    -- 检查商品是否存在 (SQL语句1)
     SELECT @productOwnerId = OwnerID, @currentStatus = Status
     FROM [Product]
     WHERE ProductID = @productId;
@@ -454,13 +459,15 @@ BEGIN
         RETURN;
     END
 
-    IF @productOwnerId != @userId
+    -- 如果不是管理员调用，则检查所有权
+    IF @invokedByAdmin = 0 AND @productOwnerId != @userId
     BEGIN
         RAISERROR('无权下架此商品，您不是该商品的发布者。', 16, 1);
         RETURN;
     END
 
     -- 只允许下架 Active, PendingReview, Rejected 状态的商品 (控制流 IF)
+    -- 管理员下架时也应遵循此逻辑，或者如果管理员有特殊权限可以下架任何状态的商品，则此处逻辑需要调整
     IF @currentStatus NOT IN ('Active', 'PendingReview', 'Rejected')
     BEGIN
         RAISERROR('商品当前状态 (%s) 不允许下架。', 16, 1, @currentStatus);

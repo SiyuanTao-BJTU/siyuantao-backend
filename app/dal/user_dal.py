@@ -912,4 +912,20 @@ class UserDAL:
             raise e
         except Exception as e:
             logger.error(f"DAL: Error marking OTP {otp_id} as used: {e}")
-            raise DALError(f"Database error marking OTP as used: {e}") from e 
+            raise DALError(f"Database error marking OTP as used: {e}") from e
+
+    async def update_user_last_login_time(self, conn: pyodbc.Connection, user_id: UUID) -> bool:
+        """更新用户的最后登录时间。"""
+        logger.debug(f"DAL: Attempting to update last login time for user ID: {user_id}")
+        sql = "{CALL sp_UpdateUserLastLoginTime(?)}"
+        params = (user_id,)
+        try:
+            rowcount = await self.execute_query_func(conn, sql, params, fetchone=False, fetchall=False)
+            if rowcount == 0:
+                logger.warning(f"DAL: Update last login time for user {user_id} returned 0 rows affected, user not found.")
+                return False
+            logger.info(f"DAL: User {user_id} last login time updated successfully.")
+            return True
+        except Exception as e:
+            logger.error(f"DAL: Error updating last login time for user {user_id}: {e}")
+            raise DALError(f"Database error updating last login time: {e}") from e 

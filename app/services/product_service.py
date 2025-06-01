@@ -5,6 +5,8 @@ from ..dal.product_dal import ProductDAL, ProductImageDAL, UserFavoriteDAL
 import pyodbc
 from app.exceptions import DALError, NotFoundError, IntegrityError, PermissionError, InternalServerError
 import logging # Import logging
+from app.schemas.user_schemas import UserResponseSchema # 添加导入
+from app.schemas.product import ProductCreate, ProductUpdate
 
 logger = logging.getLogger(__name__) # Initialize logger
 
@@ -55,114 +57,105 @@ class ProductService:
         # 移除此处对 product_image_dal.add_product_image 的循环调用
         # 因为图片的插入已由 sp_CreateProduct 存储过程在数据库层统一处理
 
-    async def update_product(self, conn: pyodbc.Connection, product_id: UUID, owner_id: UUID, product_update_data: ProductUpdate) -> None:
+    async def update_product(self, conn: pyodbc.Connection, product_id: UUID, current_user: UserResponseSchema, product_update_data: ProductUpdate) -> None:
         """
-        更新商品及其图片
-        
-        Args:
-            conn: 数据库连接对象
-            product_id: 商品ID (UUID)
-            owner_id: 商品所有者ID (UUID)
-            product_update_data: 商品更新数据 Pydantic Schema
-        
-        Raises:
-            ValueError: 输入数据验证失败时抛出
-            PermissionError: 非商品所有者尝试更新时抛出
-            DatabaseError: 数据库操作失败时抛出
+        更新商品信息，包括图片。
+        如果不是管理员，则会检查商品所有权。
         """
-        # 获取商品信息进行权限检查
-        product = await self.product_dal.get_product_by_id(conn, product_id)
-        if not product:
-            raise ValueError("Product not found")
-        
-        # 权限检查
-        if product.get("发布者用户ID") != owner_id:
-            raise PermissionError("您无权更新此商品")
+        # 检查商品是否存在且属于当前用户（除非是管理员）
+        product_detail = await self.get_product_detail(conn, product_id)
+        if not product_detail:
+            raise NotFoundError(f"商品 {product_id} 未找到")
+
+        is_admin_request = current_user.is_staff
+
+        # 如果不是管理员请求，则检查所有权
+        # 注意：product_detail 返回的键名是 '发布者用户ID'
+        actual_owner_id_str = product_detail.get('发布者用户ID')
+        if actual_owner_id_str is None:
+            logger.error(f"Could not determine owner for product {product_id} from product_detail: {product_detail}")
+            raise DALError(f"无法确定商品 {product_id} 的所有者。")
         
         try:
-            # Only update fields that are provided in product_update_data
-            update_data = product_update_data.model_dump(exclude_unset=True)
+            actual_owner_id = UUID(str(actual_owner_id_str)) # 确保转换为 UUID 对象进行比较
+        except ValueError:
+            logger.error(f"Invalid UUID format for owner_id: {actual_owner_id_str} for product {product_id}")
+            raise DALError(f"商品 {product_id} 的所有者ID格式无效。")
 
-            # Retrieve current product details to fill missing fields in update_data
-            current_category_name = product.get("商品类别") if "商品类别" in product else None
-            current_product_name = product.get("商品名称") if "商品名称" in product else ""
-            current_description = product.get("商品描述") if "商品描述" in product else None
-            current_quantity = product.get("库存") if "库存" in product and product["库存"] is not None else 0
-            current_price = product.get("价格") if "价格" in product and product["价格"] is not None else 0.0
-            current_condition = product.get("商品成色") if "商品成色" in product else None
-            
-            # Use provided data or fallback to current data
-            category_name = update_data.get("category_name", current_category_name)
-            product_name = update_data.get("product_name", current_product_name)
-            description = update_data.get("description", current_description)
-            quantity = update_data.get("quantity", current_quantity)
-            price = update_data.get("price", current_price)
-            condition = update_data.get("condition", current_condition)
+        if not is_admin_request and actual_owner_id != current_user.user_id:
+            logger.error(f"User {current_user.user_id} (not admin) attempted to update product {product_id} owned by {actual_owner_id}")
+            raise PermissionError("您无权更新此商品")
 
-            await self.product_dal.update_product(conn, product_id, owner_id, 
-                                                category_name, product_name, description, quantity, price, condition)
-            logger.info(f"Product {product_id} updated by owner {owner_id}")
+        logger.info(f"Service: User {current_user.user_id} (Admin: {is_admin_request}) updating product {product_id}")
 
-            # Handle image updates if image_urls is provided
+        try:
+            await self.product_dal.update_product(
+                conn,
+                product_id,
+                current_user.user_id, # 操作者 ID
+                category_name=product_update_data.category_name,
+                product_name=product_update_data.product_name,
+                description=product_update_data.description,
+                quantity=product_update_data.quantity,
+                price=product_update_data.price,
+                condition=product_update_data.condition,
+                is_admin_request=is_admin_request # 传递是否为管理员请求
+            )
+            # 图片处理逻辑 (如果 image_urls 在 product_update_data 中提供)
             if product_update_data.image_urls is not None:
-                # First, delete existing images for this product
+                # 1. 删除旧图片 (如果需要完全替换)
+                # 或者根据具体需求决定是增量添加还是完全替换
+                # 假设这里是完全替换，如果 image_urls 是一个空列表，则删除所有图片
                 await self.product_image_dal.delete_product_images_by_product_id(conn, product_id)
                 
-                # Then, add new images
-                for i, image_url in enumerate(product_update_data.image_urls):
-                    await self.product_image_dal.add_product_image(conn, product_id, image_url, i)
-                    logger.debug(f"Added image {image_url} for product {product_id} during update")
-        except NotFoundError:
-            raise
-        except PermissionError:
-            raise
+                # 2. 添加新图片
+                for sort_order, image_url in enumerate(product_update_data.image_urls):
+                    await self.product_image_dal.add_product_image(conn, product_id, image_url, sort_order)
+            
+            logger.info(f"Product {product_id} updated successfully by user {current_user.user_id}")
+
         except DALError as e:
-            logger.error(f"DAL error updating product {product_id}: {e}")
-            raise
+            logger.error(f"DALError during product update for {product_id} by user {current_user.user_id}: {e}")
+            raise # Re-raise the DALError to be handled by the router
         except Exception as e:
-            logger.error(f"Unexpected error updating product {product_id}: {e}", exc_info=True)
-            raise InternalServerError("更新商品失败")
+            logger.error(f"Unexpected error during product update for {product_id} by user {current_user.user_id}: {e}")
+            raise InternalServerError(f"更新商品时发生意外错误: {e}")
 
-    async def delete_product(self, conn: pyodbc.Connection, product_id: UUID, owner_id: UUID) -> None:
+    async def delete_product(self, conn: pyodbc.Connection, product_id: UUID, current_user: UserResponseSchema) -> None:
         """
-        删除商品
-        
-        Args:
-            conn: 数据库连接对象
-            product_id: 商品ID (UUID)
-            owner_id: 商品所有者ID或管理员ID (UUID)
-        
-        Raises:
-            NotFoundError: 商品未找到时抛出
-            PermissionError: 非商品所有者或管理员尝试删除时抛出
-            DatabaseError: 数据库操作失败时抛出
+        删除商品。管理员可以删除任何商品，普通用户只能删除自己的商品。
         """
-        # Check if the product exists and belongs to the owner or if the user is an admin
-        existing_product = await self.product_dal.get_product_by_id(conn, product_id)
-        if not existing_product:
-            raise NotFoundError(f"Product with ID {product_id} not found.")
+        product_detail = await self.get_product_detail(conn, product_id)
+        if not product_detail:
+            raise NotFoundError(f"商品 {product_id} 未找到")
 
-        # Check if the user is the owner
-        if existing_product["发布者用户ID"] != owner_id:
-            raise PermissionError("您无权删除此商品")
-        
+        is_admin_request = current_user.is_staff
+        actual_owner_id = None
+        if not is_admin_request: # 仅在非管理员时需要获取和比较所有者ID
+            actual_owner_id_str = product_detail.get('发布者用户ID')
+            if actual_owner_id_str is None:
+                logger.error(f"Could not determine owner for product {product_id} to delete.")
+                raise DALError(f"无法确定商品 {product_id} 的所有者以进行删除操作。")
+            try:
+                actual_owner_id = UUID(str(actual_owner_id_str))
+            except ValueError:
+                logger.error(f"Invalid UUID format for owner_id: {actual_owner_id_str} for product {product_id} to delete.")
+                raise DALError(f"商品 {product_id} 的所有者ID格式无效。")
+
+            if actual_owner_id != current_user.user_id:
+                logger.error(f"User {current_user.user_id} (not admin) attempted to delete product {product_id} owned by {actual_owner_id}")
+                raise PermissionError("您无权删除此商品")
+
+        logger.info(f"Service: User {current_user.user_id} (Admin: {is_admin_request}) deleting product {product_id}")
         try:
-            await self.product_dal.delete_product(conn, product_id, owner_id)
-            logger.info(f"Product {product_id} deleted by owner {owner_id}")
-
-            # Optionally delete associated images
-            await self.product_image_dal.delete_product_images_by_product_id(conn, product_id)
-            logger.debug(f"Deleted images for product {product_id}")
-        except NotFoundError:
-            raise
-        except PermissionError:
-            raise
+            await self.product_dal.delete_product(conn, product_id, current_user.user_id, is_admin_request)
+            logger.info(f"Product {product_id} deleted successfully by user {current_user.user_id}")
         except DALError as e:
-            logger.error(f"DAL error deleting product {product_id}: {e}")
+            logger.error(f"DALError during product deletion for {product_id} by user {current_user.user_id}: {e}")
             raise
         except Exception as e:
-            logger.error(f"Unexpected error deleting product {product_id}: {e}", exc_info=True)
-            raise InternalServerError("删除商品失败")
+            logger.error(f"Unexpected error during product deletion for {product_id} by user {current_user.user_id}: {e}")
+            raise InternalServerError(f"删除商品时发生意外错误: {e}")
 
     async def activate_product(self, conn: pyodbc.Connection, product_id: UUID, admin_id: UUID) -> None:
         # 路由层已经处理了管理员权限验证，服务层不需要重复此检查。
@@ -198,38 +191,48 @@ class ProductService:
             logger.error(f"Unexpected error rejecting product {product_id}: {e}", exc_info=True)
             raise InternalServerError("拒绝商品失败") # Modified: Specific error message
 
-    async def withdraw_product(self, conn: pyodbc.Connection, product_id: UUID, owner_id: UUID) -> None:
+    async def withdraw_product(self, conn: pyodbc.Connection, product_id: UUID, current_user: UserResponseSchema) -> None:
         """
-        商品所有者下架商品
-        
-        Args:
-            conn: 数据库连接对象
-            product_id: 商品ID (UUID)
-            owner_id: 商品所有者ID (UUID)
-        
-        Raises:
-            PermissionError: 非商品所有者尝试操作时抛出
-            DatabaseError: 数据库操作失败时抛出
+        下架商品。管理员可以下架任何商品，普通用户只能下架自己的商品。
         """
-        # Check if the product exists and belongs to the owner before attempting to withdraw
-        existing_product = await self.product_dal.get_product_by_id(conn, product_id)
-        if not existing_product:
-            raise NotFoundError(f"Product with ID {product_id} not found.")
-        
-        if existing_product["发布者用户ID"] != owner_id:
-            raise PermissionError("您无权下架此商品")
+        product_detail = await self.get_product_detail(conn, product_id)
+        if not product_detail:
+            raise NotFoundError(f"商品 {product_id} 未找到")
 
+        is_admin_request = current_user.is_staff
+        actual_owner_id = None
+
+        if not is_admin_request: # 仅在非管理员时需要获取和比较所有者ID
+            actual_owner_id_str = product_detail.get('发布者用户ID')
+            if actual_owner_id_str is None:
+                logger.error(f"Could not determine owner for product {product_id} to withdraw.")
+                raise DALError(f"无法确定商品 {product_id} 的所有者以进行下架操作。")
+            try:
+                actual_owner_id = UUID(str(actual_owner_id_str))
+            except ValueError:
+                logger.error(f"Invalid UUID format for owner_id: {actual_owner_id_str} for product {product_id} to withdraw.")
+                raise DALError(f"商品 {product_id} 的所有者ID格式无效。")
+            
+            if actual_owner_id != current_user.user_id:
+                logger.error(f"User {current_user.user_id} (not admin) attempted to withdraw product {product_id} owned by {actual_owner_id}")
+                raise PermissionError("您无权下架此商品")
+        
+        # 检查商品状态是否允许下架 (此逻辑对用户和管理员均适用)
+        current_status = product_detail.get('商品状态')
+        if current_status not in ('Active', 'PendingReview', 'Rejected'):
+            logger.warning(f"User {current_user.user_id} (Admin: {is_admin_request}) attempted to withdraw product {product_id} with status {current_status}, which is not allowed.")
+            raise PermissionError(f"商品当前状态 ({current_status}) 不允许下架。")
+
+        logger.info(f"Service: User {current_user.user_id} (Admin: {is_admin_request}) withdrawing product {product_id}")
         try:
-            await self.product_dal.withdraw_product(conn, product_id, owner_id)
-            logger.info(f"Product {product_id} withdrawn by owner {owner_id}")
-        except NotFoundError:
-            raise
+            await self.product_dal.withdraw_product(conn, product_id, current_user.user_id, is_admin_request)
+            logger.info(f"Product {product_id} withdrawn successfully by user {current_user.user_id}")
         except DALError as e:
-            logger.error(f"DAL error withdrawing product {product_id}: {e}")
+            logger.error(f"DALError during product withdrawal for {product_id} by user {current_user.user_id}: {e}")
             raise
         except Exception as e:
-            logger.error(f"Unexpected error withdrawing product {product_id}: {e}", exc_info=True)
-            raise InternalServerError("下架商品失败") # Modified: Specific error message
+            logger.error(f"Unexpected error during product withdrawal for {product_id} by user {current_user.user_id}: {e}")
+            raise InternalServerError(f"下架商品时发生意外错误: {e}")
 
     async def get_product_list(self, conn: pyodbc.Connection, category_name: Optional[str] = None, status: Optional[str] = None, 
                               keyword: Optional[str] = None, min_price: Optional[float] = None, 

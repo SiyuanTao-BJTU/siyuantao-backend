@@ -58,36 +58,41 @@ class ProductDAL:
         )
         logger.info(f"DAL: Executing sp_CreateProduct with params: {params}") # 添加这一行
         
-    async def update_product(self, conn: pyodbc.Connection, product_id: UUID, owner_id: UUID, category_name: str, product_name: str, 
-                            description: str, quantity: int, price: float, condition: Optional[str] = None) -> None:
+    async def update_product(self, conn: pyodbc.Connection, product_id: UUID, current_operator_id: UUID, 
+                            category_name: Optional[str], product_name: Optional[str], 
+                            description: Optional[str], quantity: Optional[int], 
+                            price: Optional[float], condition: Optional[str] = None, 
+                            is_admin_request: bool = False) -> None:
         """
         更新商品信息
         
         Args:
             conn: 数据库连接对象
             product_id: 商品ID (UUID)
-            owner_id: 商品所有者ID (UUID)
+            current_operator_id: 操作者用户ID (UUID)，可以是所有者或管理员
             category_name: 商品分类名称
             product_name: 商品名称
             description: 商品描述
             quantity: 商品数量
             price: 商品价格
             condition: 商品成色 (可选)
+            is_admin_request: 是否由管理员请求 (布尔值)
         
         Raises:
             DatabaseError: 数据库操作失败时抛出
-            PermissionError: 非商品所有者尝试更新时抛出
+            PermissionError: 非商品所有者尝试更新时抛出 (此权限应由服务层处理)
         """
-        sql = "{CALL sp_UpdateProduct(?, ?, ?, ?, ?, ?, ?, ?)}"
+        sql = "{CALL sp_UpdateProduct(?, ?, ?, ?, ?, ?, ?, ?, ?)}" # 9个参数
         params = (
-            product_id, # Passed as UUID
-            owner_id, # Passed as UUID
-            category_name,
-            product_name,
+            product_id, 
+            current_operator_id, 
+            product_name, # 注意这里的顺序与SP定义一致
             description,
             quantity,
             price,
-            condition
+            category_name,
+            condition,
+            is_admin_request
         )
         try:
             # Use execute_query for update, check rowcount for success
@@ -103,32 +108,43 @@ class ProductDAL:
             logger.error(f"Unexpected Error updating product {product_id}: {e}")
             raise e
 
-    async def delete_product(self, conn: pyodbc.Connection, product_id: UUID, owner_id: UUID) -> None:
+    async def delete_product(self, conn: pyodbc.Connection, product_id: UUID, current_operator_id: UUID, is_admin_request: bool = False) -> None:
         """
         删除商品
         
         Args:
             conn: 数据库连接对象
             product_id: 商品ID (UUID)
-            owner_id: 商品所有者ID或管理员ID (UUID)
+            current_operator_id: 操作者ID (UUID)，可以是所有者或管理员
+            is_admin_request: 是否由管理员请求 (布尔值)
         
         Raises:
             DatabaseError: 数据库操作失败时抛出
-            PermissionError: 非商品所有者或管理员尝试删除时抛出
+            NotFoundError: 商品未找到或无权限删除时（由SP抛出RAISERROR，被映射）
         """
-        sql = "{CALL sp_DeleteProduct(?, ?)}"
+        sql = "{CALL sp_DeleteProduct(?, ?, ?)}"
         params = (
-            product_id, # Passed as UUID
-            owner_id # Passed as UUID
+            product_id,
+            current_operator_id,
+            is_admin_request
         )
         try:
             rowcount = await self._execute_query(conn, sql, params, fetchone=False, fetchall=False)
-            if rowcount == 0:
-                 logger.warning(f"DAL: Delete product {product_id} returned 0 rows affected, possibly not found or no changes.")
-                 raise NotFoundError(f"Product with ID {product_id} not found for deletion or not owned by user {owner_id}.")
+            # sp_DeleteProduct 在找不到商品或无权限时会 RAISERROR, 
+            # 如果成功执行，则rowcount通常是1 (或受影响的行数)。
+            # 如果RAISERROR被pyodbc捕获并转换为pyodbc.Error，则会进入下面的except块。
+            # 如果存储过程执行成功但没有删除行（例如，因为条件不满足但没有RAISERROR），
+            # 并且我们依赖rowcount来判断成功与否，那么这里的逻辑可能需要调整。
+            # 但通常，对于删除操作，如果SP设计为在未找到或无权限时RAISERROR，那么执行到这里就意味着成功。
+            if rowcount == 0 and not is_admin_request: # 额外检查，虽然SP会RAISERROR
+                 logger.warning(f"DAL: Delete product {product_id} returned 0 rows affected by user {current_operator_id}. SP might not have raised error but did not delete.")
+                 # SP应该已经处理了错误情况，这里更多是防御性日志
             # Consider specific error messages from SP if available
         except pyodbc.Error as e:
-            logger.error(f"DAL Error deleting product {product_id}: {e}")
+            logger.error(f"DAL Error deleting product {product_id} by operator {current_operator_id} (Admin: {is_admin_request}): {e}")
+            # 根据e的内容判断是否是预期的NotFoundError或PermissionError
+            # 例如，sqlstate 42000 且包含特定错误消息
+            # 这里我们依赖上层service或router来处理具体的HTTPException转换
             raise DALError(f"Database error deleting product {product_id}: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected Error deleting product {product_id}: {e}")
@@ -205,31 +221,33 @@ class ProductDAL:
             logger.error(f"DAL: Unexpected error rejecting product {product_id}: {e}")
             raise DALError(f"Unexpected error rejecting product {product_id}: {e}") from e
 
-    async def withdraw_product(self, conn: pyodbc.Connection, product_id: UUID, owner_id: UUID) -> None:
+    async def withdraw_product(self, conn: pyodbc.Connection, product_id: UUID, current_operator_id: UUID, is_admin_request: bool = False) -> None:
         """
-        商品所有者下架商品，将商品状态设为Withdrawn
+        商品所有者或管理员下架商品，将商品状态设为Withdrawn
         
         Args:
             conn: 数据库连接对象
             product_id: 商品ID (UUID)
-            owner_id: 商品所有者ID (UUID)
+            current_operator_id: 操作者ID (UUID)，可以是所有者或管理员
+            is_admin_request: 是否由管理员请求 (布尔值)
         
         Raises:
             DatabaseError: 数据库操作失败时抛出
-            PermissionError: 非商品所有者尝试操作时抛出
+            NotFoundError: 商品未找到或无权限下架时（由SP抛出RAISERROR，被映射）
         """
-        sql = "{CALL sp_WithdrawProduct(?, ?)}"
+        sql = "{CALL sp_WithdrawProduct(?, ?, ?)}"
         params = (
-            product_id, # Passed as UUID
-            owner_id # Passed as UUID
+            product_id,
+            current_operator_id,
+            is_admin_request
         )
         try:
             rowcount = await self._execute_query(conn, sql, params, fetchone=False, fetchall=False)
-            if rowcount == 0:
-                 logger.warning(f"DAL: Withdraw product {product_id} returned 0 rows affected. Owner {owner_id}.")
-                 raise NotFoundError(f"Product with ID {product_id} not found for withdrawal or not owned by user {owner_id}.")
+            # 类似于delete_product, SP会RAISERROR处理错误
+            if rowcount == 0 and not is_admin_request: # 额外检查
+                 logger.warning(f"DAL: Withdraw product {product_id} returned 0 rows affected by user {current_operator_id}. SP might not have raised error but did not withdraw.")
         except pyodbc.Error as e:
-            logger.error(f"DAL Error withdrawing product {product_id}: {e}")
+            logger.error(f"DAL Error withdrawing product {product_id} by operator {current_operator_id} (Admin: {is_admin_request}): {e}")
             raise DALError(f"Database error withdrawing product {product_id}: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected Error withdrawing product {product_id}: {e}")
@@ -562,7 +580,7 @@ class UserFavoriteDAL:
             DatabaseError: 数据库操作失败时抛出
             IntegrityError: 重复收藏时抛出
         """
-        sql = "{CALL sp_AddUserFavorite(?, ?)}"
+        sql = "{CALL sp_AddFavoriteProduct(?, ?)}"
         params = (user_id, product_id) # Passed as UUID
         try:
             await self._execute_query(conn, sql, params, fetchone=False, fetchall=False)
