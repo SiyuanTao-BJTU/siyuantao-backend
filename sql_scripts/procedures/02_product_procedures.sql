@@ -94,7 +94,8 @@ BEGIN
         @sortBy NVARCHAR(50),   -- 对应DAL层传入的 order_by
         @sortOrder NVARCHAR(10),-- 对应DAL层传入的 "DESC"
         @status NVARCHAR(20),
-        @ownerId UNIQUEIDENTIFIER'; -- 添加 @ownerId 这里
+        @ownerId UNIQUEIDENTIFIER,
+        @offset INT'; 
 
     -- 执行动态SQL (新增 @ownerId 参数的传递)
     EXEC sp_executesql @sql,
@@ -108,7 +109,9 @@ BEGIN
         @sortBy = @sortBy,          -- << 新增这一行
         @sortOrder = @sortOrder,    -- << 新增这一行
         @status = @status,
-        @ownerId = @ownerId;
+        @ownerId = @ownerId,
+        @offset = @offset;
+
 
 END;
 GO
