@@ -54,7 +54,7 @@ LOGGING_CONFIG = {
         "default": { # Formatter for general application logs
             # Use Uvicorn's formatter if available, otherwise use a basic one
             "()": "uvicorn.logging.DefaultFormatter" if uvicorn and hasattr(uvicorn.logging, "DefaultFormatter") else "logging.Formatter",
-            "fmt": "%(levelprefix)s %(asctime)s | %(name)s | %(message)s",
+            "fmt": "%(levelname)s | %(asctime)s | %(name)s | %(message)s",
             "datefmt": "%Y-%m-%d %H:%M:%S",
           },
         # Add access formatter if needed, though less relevant for a script
