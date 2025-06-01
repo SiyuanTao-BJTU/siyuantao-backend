@@ -1,5 +1,5 @@
-# app/utils/auth.py
-
+import os
+import hashlib
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -9,7 +9,6 @@ from uuid import UUID
 
 from app.config import settings
 from app.schemas.user_schemas import TokenData
-# from app.services.user_service import UserService # 移除对UserService的导入
 
 # 从配置文件获取 JWT 密钥和算法
 SECRET_KEY = settings.SECRET_KEY
@@ -18,24 +17,29 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30 # 访问令牌过期时间（分钟）
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login") # 指向登录API端点
 
-# 密码哈希（使用 passlib 库，需要在 requirements.txt 中添加）
-# from passlib.context import CryptContext
-# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# 密码哈希
+def get_password_hash(password: str) -> str:
+    """Hashes a password using PBKDF2 with SHA256."""
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 100000)
+    # Store salt and hashed password together, separated by a colon, in hex format
+    return f"{salt.hex()}:{dk.hex()}"
 
-# def verify_password(plain_password, hashed_password):
-#     return pwd_context.verify(plain_password, hashed_password)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verifies a plain password against a hashed password."""
+    try:
+        salt_hex, dk_hex = hashed_password.split(':')
+        salt = bytes.fromhex(salt_hex)
+        dk = bytes.fromhex(dk_hex)
 
-# def get_password_hash(password):
-#     return pwd_context.hash(password)
+        # Hash the plain password with the retrieved salt
+        new_dk = hashlib.pbkdf2_hmac('sha256', plain_password.encode('utf-8'), salt, 100000)
 
-# 开发阶段：使用明文密码（请在部署的项目中替换为安全的哈希）
-def verify_password(plain_password, stored_password_hash):
-    # WARNING: In production, replace with secure password hashing (e.g., bcrypt)
-    return plain_password == stored_password_hash
-
-def get_password_hash(password):
-     # WARNING: In production, replace with secure password hashing (e.g., bcrypt)
-     return password # 返回明文，仅为示例
+        # Compare the new hash with the stored hash
+        return new_dk == dk
+    except ValueError:
+        # Handle cases where the hashed_password format is incorrect (e.g., not a valid hash format)
+        return False
 
 # 创建访问令牌
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
@@ -48,10 +52,5 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-# 获取当前活动用户 (移动到 dependencies.py)
-# async def get_current_user(...):
-# ... removed ...
-
-# 获取当前活动用户（仅限管理员）(移动到 dependencies.py)
-# async def get_current_active_admin_user(...):
-# ... removed ... 
+# get_current_user, get_current_active_admin_user, get_current_authenticated_user 等依赖项
+# 已移动到 dependencies.py，这里不需要重复定义

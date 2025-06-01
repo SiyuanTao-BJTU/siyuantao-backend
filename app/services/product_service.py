@@ -48,17 +48,11 @@ class ProductService:
         if quantity < 0 or price < 0:
             raise ValueError("Quantity and price must be non-negative.")
         
-        # 创建商品
-        new_product_id = await self.product_dal.create_product(conn, owner_id, category_name, product_name, description, quantity, price)
+        # 创建商品 (DAL层现在会处理图片)
+        await self.product_dal.create_product(conn, owner_id, category_name, product_name, description, quantity, price, image_urls)
         
-        # Add product images using the new product ID
-        # Check if image_urls is not empty before adding
-        if image_urls:
-            sort_order = 0 # Use 0 for the first image, then increment
-            for image_url in image_urls:
-                # Call the DAL method, passing the new product ID, image URL, and sort_order
-                await self.product_image_dal.add_product_image(conn, new_product_id, image_url, sort_order)
-                sort_order += 1
+        # 移除此处对 product_image_dal.add_product_image 的循环调用
+        # 因为图片的插入已由 sp_CreateProduct 存储过程在数据库层统一处理
 
     async def update_product(self, conn: pyodbc.Connection, product_id: UUID, owner_id: UUID, product_update_data: ProductUpdate) -> None:
         """
@@ -237,7 +231,7 @@ class ProductService:
     async def get_product_list(self, conn: pyodbc.Connection, category_name: Optional[str] = None, status: Optional[str] = None, 
                               keyword: Optional[str] = None, min_price: Optional[float] = None, 
                               max_price: Optional[float] = None, order_by: str = 'PostTime', 
-                              page_number: int = 1, page_size: int = 10) -> List[Dict]:
+                              page_number: int = 1, page_size: int = 10, owner_id: Optional[UUID] = None) -> List[Dict]: # 添加 owner_id 参数
         """
         获取商品列表，支持多种筛选条件和分页
         
@@ -251,6 +245,7 @@ class ProductService:
             order_by: 排序字段 (可选，默认PostTime)
             page_number: 页码 (默认1)
             page_size: 每页数量 (默认10)
+            owner_id: 商品所有者ID (可选)
         
         Returns:
             商品列表 (List[Dict])
@@ -260,7 +255,7 @@ class ProductService:
         """
         try:
             # category_name is now directly passed to DAL
-            products_data = await self.product_dal.get_product_list(conn, category_name, status, keyword, min_price, max_price, order_by, page_number, page_size)
+            products_data = await self.product_dal.get_product_list(conn, category_name, status, keyword, min_price, max_price, order_by, page_number, page_size, owner_id)
             
             return products_data
         except DALError as e:

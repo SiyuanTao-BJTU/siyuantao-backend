@@ -158,6 +158,7 @@ app.include_router(product_routes.router, prefix="/api/v1/products", tags=["Prod
 app.include_router(order.router, prefix="/api/v1/orders", tags=["Orders"])
 app.include_router(evaluation.router, prefix="/api/v1/evaluations", tags=["Evaluations"])
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(upload_routes.router, prefix="/api/v1")
 # Mount the uploads directory to serve static files
 app.mount("/uploads", StaticFiles(directory=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'uploads'))), name="uploads")
 # ... 注册其他模块路由

@@ -22,7 +22,7 @@ class ProductDAL:
         self._execute_query = execute_query_func
 
     async def create_product(self, conn: pyodbc.Connection, owner_id: UUID, category_name: str, product_name: str, 
-                            description: str, quantity: int, price: float) -> UUID: # Changed return type to UUID
+                            description: str, quantity: int, price: float, image_urls: List[str]) -> UUID: # Added image_urls
         """
         创建新商品
         
@@ -34,6 +34,7 @@ class ProductDAL:
             description: 商品描述
             quantity: 商品数量
             price: 商品价格
+            image_urls: 图片URL列表
         
         Returns:
             新商品ID (UUID)
@@ -41,34 +42,19 @@ class ProductDAL:
         Raises:
             DatabaseError: 数据库操作失败时抛出
         """
-        sql = "{CALL sp_CreateProduct(?, ?, ?, ?, ?, ?)}"
+        # Convert list of image URLs to a comma-separated string
+        image_urls_str = ",".join(image_urls) if image_urls else None
+        
+        sql = "{CALL sp_CreateProduct(?, ?, ?, ?, ?, ?, ?)}" # Added one more ? for image_urls
         params = (
             owner_id, # Passed as UUID
-            category_name,
-            product_name,
+            product_name, # Changed order to match SP
             description,
+            price,
             quantity,
-            price
+            category_name,
+            image_urls_str # Added image_urls_str
         )
-        # Execute the query and fetch the result (should be the new product ID)
-        result = await self._execute_query(conn, sql, params, fetchone=True)
-        
-        # Assuming the stored procedure returns the new product ID in a column named '新商品ID' or 'NewProductID'
-        # Need to check the actual SP definition for the exact column name.
-        # Based on 02_product_procedures.sql, it returns '新商品ID'.
-        new_product_id_str = result.get('新商品ID') if result else None # Changed key to '新商品ID'
-        
-        if not new_product_id_str:
-            # Handle case where SP executed but did not return the expected ID
-            logger.error(f"DAL: sp_CreateProduct failed to return 新商品ID. Result: {result}")
-            raise DALError("Failed to retrieve new product ID after creation.")
-        
-        try:
-            return UUID(new_product_id_str) # Convert string UUID to UUID object
-        except ValueError as e:
-            logger.error(f"DAL: Failed to convert new product ID '{new_product_id_str}' to UUID: {e}")
-            raise DALError("Failed to convert new product ID to UUID.") from e
-
     async def update_product(self, conn: pyodbc.Connection, product_id: UUID, owner_id: UUID, category_name: str, product_name: str, 
                             description: str, quantity: int, price: float) -> None:
         """
@@ -247,37 +233,22 @@ class ProductDAL:
     async def get_product_list(self, conn: pyodbc.Connection, category_name: Optional[str] = None, status: Optional[str] = None, 
                               keyword: Optional[str] = None, min_price: Optional[float] = None, 
                               max_price: Optional[float] = None, order_by: str = 'PostTime', 
-                              page_number: int = 1, page_size: int = 10) -> List[Dict]:
+                              page_number: int = 1, page_size: int = 10, owner_id: Optional[UUID] = None) -> List[Dict]: # 添加 owner_id 参数
         """
         获取商品列表，支持多种筛选条件和分页
-        
-        Args:
-            conn: 数据库连接对象
-            category_name: 商品分类名称 (可选)
-            status: 商品状态 (可选)
-            keyword: 搜索关键词 (可选)
-            min_price: 最低价格 (可选)
-            max_price: 最高价格 (可选)
-            order_by: 排序字段 (可选，默认PostTime)
-            page_number: 页码 (默认1)
-            page_size: 每页数量 (默认10)
-        
-        Returns:
-            商品列表 (List[Dict])
-        
-        Raises:
-            DatabaseError: 数据库操作失败时抛出
         """
-        sql = "{CALL sp_GetProductList(?, ?, ?, ?, ?, ?, ?, ?)}"
+        sql = "{CALL sp_GetProductList(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}" # 增加一个问号对应 ownerId
         params = (
-            category_name, # Passed as string
-            status,
-            keyword,
-            min_price,
-            max_price,
-            order_by,
-            page_number,
-            page_size
+            keyword,         # @searchQuery
+            category_name,   # @categoryName
+            min_price,       # @minPrice
+            max_price,       # @maxPrice
+            page_number,     # @page
+            page_size,       # @pageSize
+            order_by,        # @sortBy
+            "DESC",          # @sortOrder
+            status,          # @status
+            owner_id         # @ownerId
         )
         try:
             result = await self._execute_query(conn, sql, params, fetchall=True)
@@ -288,7 +259,6 @@ class ProductDAL:
         except Exception as e:
             logger.error(f"Unexpected Error getting product list: {e}")
             raise e
-
     async def get_product_by_id(self, conn: pyodbc.Connection, product_id: UUID) -> Optional[Dict]:
         """
         根据商品ID获取商品详情
@@ -448,30 +418,34 @@ class ProductImageDAL:
 
     async def add_product_image(self, conn: pyodbc.Connection, product_id: UUID, image_url: str, sort_order: int) -> None:
         """
-        添加商品图片
+        为商品添加图片记录。
         
         Args:
             conn: 数据库连接对象
             product_id: 商品ID (UUID)
             image_url: 图片URL
-            sort_order: 排序顺序
+            sort_order: 图片排序顺序
         
         Raises:
             DatabaseError: 数据库操作失败时抛出
         """
-        sql = "{CALL sp_AddProductImage(?, ?, ?)}"
-        params = (product_id, image_url, sort_order) # Passed as UUID
+        # This method should call sp_CreateImage, not sp_AddProductImage
+        sql = "{CALL sp_CreateImage(?, ?, ?)}" 
+        params = (
+            product_id, # Passed as UUID
+            image_url,
+            sort_order
+        )
         try:
-            # Use execute_query for non-fetching operation
-            await self._execute_query(conn, sql, params, fetchone=False, fetchall=False)
-            logger.info(f"DAL: Image {image_url} added for product {product_id}")
+            await self._execute_query(conn, sql, params, fetchone=False, fetchall=False) # No return expected
+            logger.info(f"DAL: Added image {image_url} for product {product_id}.")
         except pyodbc.Error as e:
             logger.error(f"DAL Error adding product image for product {product_id}: {e}")
             raise DALError(f"Database error adding product image: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected Error adding product image for product {product_id}: {e}")
             raise e
-
+        
     async def get_images_by_product_id(self, conn: pyodbc.Connection, product_id: UUID) -> List[Dict]:
         """
         获取指定商品的所有图片

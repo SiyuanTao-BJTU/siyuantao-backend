@@ -11,7 +11,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # Import the file upload utility
 from ..utils.file_upload import save_upload_file, UPLOAD_DIR # Import UPLOAD_DIR to construct the URL
 
-@router.post("/api/v1/upload/image")
+@router.post("/upload/image")
 async def upload_image(file: UploadFile = File(...)):
     """
     Uploads an image file.

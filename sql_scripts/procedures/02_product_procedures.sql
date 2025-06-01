@@ -14,22 +14,18 @@ CREATE PROCEDURE [sp_GetProductList]
     @pageSize INT = 20,
     @sortBy NVARCHAR(50) = 'PostTime', -- 默认按发布时间排序
     @sortOrder NVARCHAR(10) = 'DESC',  -- 默认降序
-    @status NVARCHAR(20) = 'Active'   -- 默认只查询Active状态的商品
+    @status NVARCHAR(20) = 'Active',   -- 默认只查询Active状态的商品
+    @ownerId UNIQUEIDENTIFIER = NULL -- 新增参数，用于按所有者过滤
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- 确保页码和页大小有效 (控制流 IF)
-    IF @page < 1 SET @page = 1;
-    IF @pageSize < 1 SET @pageSize = 20; -- 最小页大小
-    IF @pageSize > 100 SET @pageSize = 100; -- 最大页大小限制
-
-    DECLARE @offset INT = (@page - 1) * @pageSize;
+    -- 声明变量
     DECLARE @sql NVARCHAR(MAX);
+    DECLARE @offset INT = (@page - 1) * @pageSize;
     DECLARE @paramDefinition NVARCHAR(MAX);
 
     -- 构建基础查询和WHERE子句
-    -- SQL语句涉及2个表 (Product, User)，我们将尝试构建一个涉及3个表的JOIN语句来满足最低要求
     SET @sql = '
     SELECT
         p.ProductID AS 商品ID,
@@ -41,18 +37,22 @@ BEGIN
         p.Status AS 商品状态,
         u.UserName AS 发布者用户名,
         p.CategoryName AS 商品类别,
-        -- 获取主图URL (假设SortOrder=0表示主图)
         pi.ImageURL AS 主图URL,
-        COUNT(p.ProductID) OVER() AS 总商品数 -- 添加窗口函数计算总数 (SQL语句1，涉及Product, User, ProductImage 3个表)
+        COUNT(p.ProductID) OVER() AS 总商品数
     FROM [Product] p
     JOIN [User] u ON p.OwnerID = u.UserID
-    LEFT JOIN [ProductImage] pi ON p.ProductID = pi.ProductID AND pi.SortOrder = 0 -- LEFT JOIN 以便没有图片的商品也能查出
-    WHERE 1=1'; -- 1=1 恒真条件，方便后续追加 AND
+    LEFT JOIN [ProductImage] pi ON p.ProductID = pi.ProductID AND pi.SortOrder = 0
+    WHERE 1=1';
 
-
-    -- 添加过滤条件 (控制流 IF)
-    IF @status IS NOT NULL AND @status <> ''
+    -- 新增：添加过滤条件（按 ownerId 或按 status 过滤）
+    IF @ownerId IS NOT NULL
+        SET @sql = @sql + ' AND p.OwnerID = @ownerId';
+    ELSE IF @status IS NOT NULL AND @status <> ''
+        -- 仅在 ownerId 为 NULL 且 status 提供时应用 status 过滤
         SET @sql = @sql + ' AND p.Status = @status';
+    ELSE
+        -- 如果 ownerId 和 status 都为 NULL/空，则默认只查询 'Active' 状态的商品
+        SET @sql = @sql + ' AND p.Status = ''Active'''; -- Removed semicolon here as it's part of the dynamic SQL string
 
     IF @searchQuery IS NOT NULL AND @searchQuery <> ''
         SET @sql = @sql + ' AND (p.ProductName LIKE ''%'' + @searchQuery + ''%'' OR p.Description LIKE ''%'' + @searchQuery + ''%'')';
@@ -83,8 +83,7 @@ BEGIN
     -- 添加分页子句
     SET @sql = @sql + ' OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;';
 
-
-    -- 构建参数定义
+    -- 构建参数定义 (新增 @ownerId)
     SET @paramDefinition = '
         @searchQuery NVARCHAR(200),
         @categoryName NVARCHAR(100),
@@ -92,9 +91,10 @@ BEGIN
         @maxPrice DECIMAL(10, 2),
         @offset INT,
         @pageSize INT,
-        @status NVARCHAR(20)';
+        @status NVARCHAR(20),
+        @ownerId UNIQUEIDENTIFIER'; -- 添加 @ownerId 这里
 
-    -- 执行动态SQL (SQL语句2)
+    -- 执行动态SQL (新增 @ownerId 参数的传递)
     EXEC sp_executesql @sql,
         @paramDefinition,
         @searchQuery = @searchQuery,
@@ -103,53 +103,8 @@ BEGIN
         @maxPrice = @maxPrice,
         @offset = @offset,
         @pageSize = @pageSize,
-        @status = @status;
-
-END;
-GO
-
--- 获取单个商品详情（包括图片，面向UI）
-DROP PROCEDURE IF EXISTS [sp_GetProductDetail];
-GO
-CREATE PROCEDURE [sp_GetProductDetail]
-    @productId UNIQUEIDENTIFIER
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    -- 检查商品是否存在 (SQL语句1)
-    IF NOT EXISTS (SELECT 1 FROM [Product] WHERE ProductID = @productId)
-    BEGIN
-        RAISERROR('商品不存在', 16, 1);
-        RETURN;
-    END
-
-    -- 获取商品基本信息 (SQL语句2，涉及 Product, User 2个表，但后续还有图片查询)
-    SELECT
-        p.ProductID AS 商品ID,
-        p.ProductName AS 商品名称,
-        p.Description AS 商品描述,
-        p.Quantity AS 库存,
-        p.Price AS 价格,
-        p.PostTime AS 发布时间,
-        p.Status AS 商品状态,
-        u.UserName AS 发布者用户名,
-        u.AvatarUrl AS 发布者头像URL,
-        p.CategoryName AS 商品类别
-    FROM [Product] p
-    JOIN [User] u ON p.OwnerID = u.UserID
-    WHERE p.ProductID = @productId;
-
-    -- 获取商品图片 (SQL语句3)
-    SELECT
-        ImageID AS 图片ID,
-        ProductID AS 商品ID,
-        ImageURL AS 图片URL,
-        UploadTime AS 上传时间,
-        SortOrder AS 显示顺序
-    FROM [ProductImage]
-    WHERE ProductID = @productId
-    ORDER BY SortOrder ASC, UploadTime ASC; -- 按排序顺序和上传时间排序
+        @status = @status,
+        @ownerId = @ownerId; -- 传递 @ownerId 这里
 
 END;
 GO
