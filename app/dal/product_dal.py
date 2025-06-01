@@ -237,7 +237,16 @@ class ProductDAL:
         """
         获取商品列表，支持多种筛选条件和分页
         """
-        sql = "{CALL sp_GetProductList(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}" # 增加一个问号对应 ownerId
+        # 修改：直接使用 EXEC 语句调用存储过程，并使用命名参数的问号占位符
+        # 移除了大括号 {}，直接使用 EXEC 语法，并为每个参数使用 ? 占位符
+        sql = "EXEC sp_GetProductList @searchQuery=?, @categoryName=?, @minPrice=?, @maxPrice=?, @page=?, @pageSize=?, @sortBy=?, @sortOrder=?, @status=?, @ownerId=?"
+        
+        # 确保 status 为空字符串时为 None
+        processed_status = status if status != '' else None
+        
+        # 确保 owner_id 为字符串或 None
+        processed_owner_id = str(owner_id) if owner_id else None
+
         params = (
             keyword,         # @searchQuery
             category_name,   # @categoryName
@@ -247,8 +256,8 @@ class ProductDAL:
             page_size,       # @pageSize
             order_by,        # @sortBy
             "DESC",          # @sortOrder
-            status,          # @status
-            str(owner_id) if owner_id else None # @ownerId: 转换为字符串或保持None
+            processed_status,# @status
+            processed_owner_id # @ownerId
         )
         try:
             result = await self._execute_query(conn, sql, params, fetchall=True)
