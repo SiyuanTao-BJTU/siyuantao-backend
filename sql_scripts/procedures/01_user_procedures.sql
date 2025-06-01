@@ -43,13 +43,16 @@ GO
 DROP PROCEDURE IF EXISTS [sp_GetUserByUsernameWithPassword];
 GO
 CREATE PROCEDURE [sp_GetUserByUsernameWithPassword]
-    @username NVARCHAR(128)
+    @username NVARCHAR(255)
 AS
 BEGIN
     SET NOCOUNT ON;
 
+    DECLARE @trimmedUsername NVARCHAR(255);
+    SET @trimmedUsername = LTRIM(RTRIM(@username));
+
     -- 检查用户名是否为空
-    IF @username IS NULL OR LTRIM(RTRIM(@username)) = ''
+    IF @trimmedUsername IS NULL OR LTRIM(RTRIM(@trimmedUsername)) = ''
     BEGIN
         RAISERROR('用户名不能为空。', 16, 1);
         RETURN;
@@ -58,7 +61,7 @@ BEGIN
     -- SQL语句涉及1个表，包含控制流(IF)和多个SELECT列
     UPDATE [User]
     SET LastLoginTime = GETDATE()
-    WHERE UserName = @username;
+    WHERE UserName = @trimmedUsername;
 
     SELECT
         UserID,
@@ -71,7 +74,7 @@ BEGIN
         Email,
         LastLoginTime
     FROM [User]
-    WHERE UserName = @username;
+    WHERE UserName = @trimmedUsername OR Email = @trimmedUsername;
 END;
 GO
 

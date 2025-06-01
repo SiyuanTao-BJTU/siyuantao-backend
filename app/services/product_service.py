@@ -49,8 +49,9 @@ class ProductService:
             raise ValueError("Quantity and price must be non-negative.")
         
         # 创建商品 (DAL层现在会处理图片)
+        logger.info(f"Service: Creating product with: owner_id={owner_id}, category_name={category_name}, product_name={product_name}, description={description}, quantity={quantity}, price={price}, image_urls={image_urls}")
         await self.product_dal.create_product(conn, owner_id, category_name, product_name, description, quantity, price, image_urls)
-        
+        logger.info(f"Service: Product created successfully")
         # 移除此处对 product_image_dal.add_product_image 的循环调用
         # 因为图片的插入已由 sp_CreateProduct 存储过程在数据库层统一处理
 
@@ -88,6 +89,7 @@ class ProductService:
             current_description = product.get("商品描述") if "商品描述" in product else None
             current_quantity = product.get("库存") if "库存" in product and product["库存"] is not None else 0
             current_price = product.get("价格") if "价格" in product and product["价格"] is not None else 0.0
+            current_condition = product.get("商品成色") if "商品成色" in product else None
             
             # Use provided data or fallback to current data
             category_name = update_data.get("category_name", current_category_name)
@@ -95,9 +97,10 @@ class ProductService:
             description = update_data.get("description", current_description)
             quantity = update_data.get("quantity", current_quantity)
             price = update_data.get("price", current_price)
+            condition = update_data.get("condition", current_condition)
 
             await self.product_dal.update_product(conn, product_id, owner_id, 
-                                                category_name, product_name, description, quantity, price)
+                                                category_name, product_name, description, quantity, price, condition)
             logger.info(f"Product {product_id} updated by owner {owner_id}")
 
             # Handle image updates if image_urls is provided
@@ -254,9 +257,9 @@ class ProductService:
             DatabaseError: 数据库操作失败时抛出
         """
         try:
-            # category_name is now directly passed to DAL
+            logger.info(f"Service: Calling DAL.get_product_list with: category_name={category_name}, status={status}, keyword={keyword}, min_price={min_price}, max_price={max_price}, order_by={order_by}, page_number={page_number}, page_size={page_size}, owner_id={owner_id}")
             products_data = await self.product_dal.get_product_list(conn, category_name, status, keyword, min_price, max_price, order_by, page_number, page_size, owner_id)
-            
+
             return products_data
         except DALError as e:
             logger.error(f"DAL error getting product list: {e}")

@@ -3,6 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from app.exceptions import DALError
 import logging
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,17 @@ async def transaction(conn: pyodbc.Connection):
         logger.debug("Transaction: Committing changes.")
         # Use asyncio.to_thread for blocking commit operation
         await asyncio.to_thread(conn.commit)
-    except Exception as e:
-        logger.error(f"Transaction: Rolling back changes due to error: {e}", exc_info=True)
-        # Use asyncio.to_thread for blocking rollback operation
+    except HTTPException:
+        logger.debug("Transaction: HTTPException raised, propagating.")
+        raise
+    except pyodbc.Error as db_exc: # Catch specific database errors
+        logger.error(f"Transaction: Rolling back due to database error: {db_exc}", exc_info=True)
         if conn:
             await asyncio.to_thread(conn.rollback)
-        raise e # Re-raise the exception after rollback
+        raise DALError(f"Database transaction failed: {db_exc}") from db_exc # Wrap and re-raise as DALError
+    except Exception as e: # Catch other non-HTTP, non-DB application exceptions
+        logger.warning(f"Transaction: Rolling back due to application error: {e}", exc_info=True)
+        if conn:
+            await asyncio.to_thread(conn.rollback) # Still rollback
+        raise e # Re-raise the original application-level exception
  

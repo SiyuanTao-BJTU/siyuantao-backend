@@ -2,6 +2,51 @@
  * 商品相关存储过程
  */
 
+-- 获取商品详情
+DROP PROCEDURE IF EXISTS [sp_GetProductById];
+GO
+CREATE PROCEDURE [sp_GetProductById]
+    @productId UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- 检查商品是否存在 (SQL语句1)
+    IF NOT EXISTS (SELECT 1 FROM [Product] WHERE ProductID = @productId)
+    BEGIN
+        -- 可以选择不RAISERROR，而是返回空结果集，让服务层处理商品未找到的逻辑
+        -- RAISERROR('商品不存在。', 16, 1);
+        SELECT NULL AS ProductID WHERE 1 = 0; -- 返回空结果集
+        RETURN;
+    END
+
+    -- 获取商品详情 (SQL语句2)
+    SELECT
+        p.ProductID AS 商品ID,
+        p.OwnerID AS 发布者用户ID, -- 新增，用于权限检查
+        p.ProductName AS 商品名称,
+        p.Description AS 商品描述,
+        p.Quantity AS 库存,
+        p.Price AS 价格,
+        p.PostTime AS 发布时间,
+        p.Status AS 商品状态,
+        u.UserName AS 发布者用户名,
+        p.CategoryName AS 商品类别,
+        -- 获取所有图片URL (SQL语句3)
+        STUFF((
+            SELECT ',' + ImageURL
+            FROM [ProductImage]
+            WHERE ProductID = p.ProductID
+            ORDER BY SortOrder, UploadTime
+            FOR XML PATH('')
+        ), 1, 1, '') AS ImageURLs -- 返回逗号分隔的图片URL字符串
+    FROM [Product] p
+    JOIN [User] u ON p.OwnerID = u.UserID
+    WHERE p.ProductID = @productId;
+
+END;
+GO
+
 -- 获取商品列表（带分页和过滤，面向UI）
 DROP PROCEDURE IF EXISTS [sp_GetProductList];
 GO
@@ -14,7 +59,7 @@ CREATE PROCEDURE [sp_GetProductList]
     @pageSize INT = 20,
     @sortBy NVARCHAR(50) = 'PostTime', -- 默认按发布时间排序
     @sortOrder NVARCHAR(10) = 'DESC',  -- 默认降序
-    @status NVARCHAR(20) = 'Active',   -- 默认只查询Active状态的商品
+    @status NVARCHAR(20) = NULL,   -- 默认值改为 NULL
     @ownerId UNIQUEIDENTIFIER = NULL -- 新增参数，用于按所有者过滤
 AS
 BEGIN
@@ -52,7 +97,7 @@ BEGIN
         SET @sql = @sql + ' AND p.Status = @status';
     ELSE
         -- 如果 ownerId 和 status 都为 NULL/空，则默认只查询 'Active' 状态的商品
-        SET @sql = @sql + ' AND p.Status = ''Active'''; -- Removed semicolon here as it's part of the dynamic SQL string
+        SET @sql = @sql + ' AND p.Status = ''Active''';
 
     IF @searchQuery IS NOT NULL AND @searchQuery <> ''
         SET @sql = @sql + ' AND (p.ProductName LIKE ''%'' + @searchQuery + ''%'' OR p.Description LIKE ''%'' + @searchQuery + ''%'')';
@@ -112,118 +157,9 @@ BEGIN
         @ownerId = @ownerId,
         @offset = @offset;
 
-
 END;
 GO
 
--- 创建新商品
-DROP PROCEDURE IF EXISTS [sp_CreateProduct];
-GO
-CREATE PROCEDURE [sp_CreateProduct]
-    @ownerId UNIQUEIDENTIFIER,
-    @productName NVARCHAR(200),
-    @description NVARCHAR(MAX) = NULL,
-    @price DECIMAL(10, 2),
-    @quantity INT,
-    @categoryName NVARCHAR(100) = NULL,
-    @imageUrls NVARCHAR(MAX) = NULL -- 逗号分隔的URL字符串
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON; -- 遇到错误自动回滚
-
-    DECLARE @newProductId UNIQUEIDENTIFIER = NEWID();
-    DECLARE @ownerIsVerified BIT;
-
-    -- 检查 @ownerId 对应的用户是否存在且 IsVerified = 1 (SQL语句1)
-    SELECT @ownerIsVerified = IsVerified FROM [User] WHERE UserID = @ownerId;
-    IF @ownerIsVerified IS NULL
-    BEGIN
-        RAISERROR('用户不存在。', 16, 1);
-        RETURN;
-    END
-    -- 控制流 IF
-    IF @ownerIsVerified = 0
-    BEGIN
-        RAISERROR('用户未完成邮箱认证，无法发布商品。', 16, 1);
-        RETURN;
-    END
-
-    -- 检查数量和价格是否有效 (控制流 IF)
-    IF @quantity <= 0
-    BEGIN
-        RAISERROR('商品数量必须大于0。', 16, 1);
-        RETURN;
-    END
-     IF @price < 0
-    BEGIN
-        RAISERROR('商品价格不能为负数。', 16, 1);
-        RETURN;
-    END
-
-    -- 检查商品名称是否为空 (控制流 IF)
-    IF @productName IS NULL OR LTRIM(RTRIM(@productName)) = ''
-    BEGIN
-        RAISERROR('商品名称不能为空。', 16, 1);
-        RETURN;
-    END
-
-    BEGIN TRY
-        BEGIN TRANSACTION; -- 开始事务
-
-        -- 插入 Product 记录，初始状态 PendingReview (SQL语句2)
-        INSERT INTO [Product] (ProductID, OwnerID, CategoryName, ProductName, Description, Quantity, Price, PostTime, Status)
-        VALUES (@newProductId, @ownerId, @categoryName, @productName, @description, @quantity, @price, GETDATE(), 'PendingReview');
-
-        -- 解析 @imageUrls 字符串，循环插入 [ProductImage] 表
-        -- 使用 WHILE 循环进行控制流
-        IF @imageUrls IS NOT NULL AND @imageUrls <> ''
-        BEGIN
-            DECLARE @imgUrl NVARCHAR(255);
-            DECLARE @pos INT = 0;
-            DECLARE @nextPos INT = 1;
-            DECLARE @sortOrder INT = 0; -- 第一张图设为主图 (SortOrder = 0)
-
-            SET @imageUrls = @imageUrls + ','; -- Add a comma at the end
-
-            WHILE @pos < LEN(@imageUrls) -- 控制流 WHILE
-            BEGIN
-                SET @nextPos = CHARINDEX(',', @imageUrls, @pos + 1);
-                -- 控制流 IF
-                IF @nextPos > @pos
-                BEGIN
-                     SET @imgUrl = SUBSTRING(@imageUrls, @pos + 1, @nextPos - @pos - 1);
-                     SET @imgUrl = LTRIM(RTRIM(@imgUrl)); -- 清除前后空白
-
-                     -- 控制流 IF
-                     IF @imgUrl <> ''
-                     BEGIN
-                         -- 插入 ProductImage 记录 (SQL语句3, 4, ...)
-                         INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, UploadTime, SortOrder)
-                         VALUES (NEWID(), @newProductId, @imgUrl, GETDATE(), @sortOrder);
-
-                         -- 控制流 IF ELSE
-                         IF @sortOrder = 0 SET @sortOrder = 1; -- 首张图片设为SortOrder 0，后续从1递增
-                         ELSE SET @sortOrder = @sortOrder + 1;
-                     END
-                END
-                SET @pos = @nextPos;
-            END
-        END
-
-        COMMIT TRANSACTION; -- 提交事务
-
-        -- 返回新创建商品的ID (SQL语句 n, 面向UI)
-        SELECT @newProductId AS 新商品ID;
-
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0
-            ROLLBACK TRANSACTION;
-        THROW; -- 重新抛出捕获的错误
-    END CATCH
-END;
-GO
 
 -- 更新商品信息
 DROP PROCEDURE IF EXISTS [sp_UpdateProduct];
@@ -235,7 +171,8 @@ CREATE PROCEDURE [sp_UpdateProduct]
     @description NVARCHAR(MAX) = NULL,
     @quantity INT = NULL,
     @price DECIMAL(10, 2) = NULL,
-    @categoryName NVARCHAR(100) = NULL
+    @categoryName NVARCHAR(100) = NULL,
+    @condition NVARCHAR(50) = NULL -- 添加 condition 参数
     -- 图片的增删改查通过独立的图片存储过程处理
 AS
 BEGIN
@@ -295,7 +232,8 @@ BEGIN
             Description = ISNULL(@description, Description),
             Quantity = ISNULL(@quantity, Quantity),
             Price = ISNULL(@price, Price),
-            CategoryName = ISNULL(@categoryName, CategoryName)
+            CategoryName = ISNULL(@categoryName, CategoryName),
+            Condition = ISNULL(@condition, Condition) -- 更新 Condition
             -- Status 不通过此SP修改，审核和下架有独立的SP
         WHERE ProductID = @productId;
 

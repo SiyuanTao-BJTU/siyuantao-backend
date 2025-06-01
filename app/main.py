@@ -108,6 +108,12 @@ logger.info("FastAPI application instance created.") # Changed from print to log
 
 logger.info(f"FastAPI app instance created with id: {id(app)}")
 
+# Get allowed origins from environment variable, default to localhost for development
+# Example: FRONTEND_DOMAIN="http://localhost:3301,https://yourdeployeddomain.com"
+frontend_urls_str = os.getenv("FRONTEND_DOMAIN", "http://localhost:3301")
+allowed_origins_list = [url.strip() for url in frontend_urls_str.split(',')]
+logger.info(f"CORS allowed origins: {allowed_origins_list}")
+
 # Custom Middleware to log requests
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -119,7 +125,7 @@ async def log_requests(request: Request, call_next):
 # 注册 CORS 中间件 (生产环境中请限制 allow_origins)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # 生产环境请限制为您的前端域名
+    allow_origins=allowed_origins_list, # 使用从环境变量加载的列表
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -133,11 +139,12 @@ app.add_exception_handler(PermissionError, forbidden_exception_handler)
 # 对于未捕获的 HTTPException (例如 Pydantic 验证失败)
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc: HTTPException):
-    logger.error(f"HTTPException caught by global handler: Status {exc.status_code}, Detail: {exc.detail}, Headers: {exc.headers}")
+    # 添加更明确的日志，确认此处理器被调用
+    logger.error(f"CUSTOM HTTP_EXCEPTION_HANDLER CALLED: Status {exc.status_code}, Detail: {exc.detail}", exc_info=True)
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail},
-        headers=exc.headers
+        headers=getattr(exc, "headers", None)
     )
 
 # Custom exception handler for Pydantic RequestValidationError
@@ -151,6 +158,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content=jsonable_encoder({"detail": exc.errors()}),
     )
 
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    # 捕获所有未被其他特定处理器捕获的通用异常
+    logger.error(f"全局异常处理器捕获到未处理异常: {type(exc).__name__} - {str(exc)}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "服务器内部发生错误，请联系管理员检查后端日志。"} # 恢复为通用信息
+    )
 
 # 注册路由模块
 app.include_router(users.router, prefix="/api/v1")

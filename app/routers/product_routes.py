@@ -119,8 +119,10 @@ async def create_product(product: ProductCreate, user = Depends(get_current_auth
     """
     owner_id = user["user_id"] # Directly access user_id from dict
     try:
+        logger.info(f"Router: Creating product with: owner_id={owner_id}, category_name={product.category_name}, product_name={product.product_name}, description={product.description}, quantity={product.quantity}, price={product.price}, image_urls={product.image_urls}")
         await product_service.create_product(conn, owner_id, product.category_name, product.product_name, 
                                             product.description, product.quantity, product.price, product.image_urls)
+        logger.info(f"Router: Product created successfully")
         return {"message": "商品创建成功"}
     except (ValueError, IntegrityError, DALError) as e: # Group ValueError, IntegrityError, DALError for 400
         logger.error(f"Error creating product: {e}")

@@ -41,6 +41,7 @@ CREATE TABLE [Product] (
     [Description] NVARCHAR(MAX) NULL,                           -- 商品详细描述，可为空，支持大文本
     [Quantity] INT NOT NULL CHECK ([Quantity] >= 0),            -- 商品库存数量，不允许为空，必须大于等于0
     [Price] DECIMAL(10, 2) NOT NULL CHECK ([Price] >= 0),       -- 商品价格，不允许为空，必须大于等于0
+    [Condition] NVARCHAR(50) NULL,                              -- 商品成色 (例如: 全新, 九成新, 八成新等), 可为空
     [PostTime] DATETIME NOT NULL DEFAULT GETDATE(),             -- 商品发布时间，不允许为空，默认当前系统时间
     [Status] NVARCHAR(20) NOT NULL DEFAULT 'PendingReview'      -- 商品当前状态，默认为'PendingReview'
         CHECK ([Status] IN ('PendingReview', 'Rejected', 'Active', 'Sold', 'Withdrawn')), -- PendingReview (待审核) Rejected (管理员已拒绝) Active (在售) Sold (已售罄) Withdrawn (下架) 

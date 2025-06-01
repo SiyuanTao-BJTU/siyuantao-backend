@@ -25,6 +25,7 @@ class ProductUpdate(BaseModel):
     description: Optional[str] = None
     quantity: Optional[int] = None
     price: Optional[float] = None
+    condition: Optional[str] = None
     image_urls: Optional[List[str]] = Field(None)
 
 class Product(ProductBase):

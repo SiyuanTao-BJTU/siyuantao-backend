@@ -44,8 +44,9 @@ class ProductDAL:
         """
         # Convert list of image URLs to a comma-separated string
         image_urls_str = ",".join(image_urls) if image_urls else None
-        
+        logger.info(f"DAL: Creating product with: owner_id={owner_id}, category_name={category_name}, product_name={product_name}, description={description}, quantity={quantity}, price={price}, image_urls={image_urls_str}")
         sql = "{CALL sp_CreateProduct(?, ?, ?, ?, ?, ?, ?)}" # Added one more ? for image_urls
+        logger.info(f"DAL: Executing sp_CreateProduct with SQL: {sql}") # 添加这一行
         params = (
             owner_id, # Passed as UUID
             product_name, # Changed order to match SP
@@ -55,8 +56,10 @@ class ProductDAL:
             category_name,
             image_urls_str # Added image_urls_str
         )
+        logger.info(f"DAL: Executing sp_CreateProduct with params: {params}") # 添加这一行
+        
     async def update_product(self, conn: pyodbc.Connection, product_id: UUID, owner_id: UUID, category_name: str, product_name: str, 
-                            description: str, quantity: int, price: float) -> None:
+                            description: str, quantity: int, price: float, condition: Optional[str] = None) -> None:
         """
         更新商品信息
         
@@ -69,12 +72,13 @@ class ProductDAL:
             description: 商品描述
             quantity: 商品数量
             price: 商品价格
+            condition: 商品成色 (可选)
         
         Raises:
             DatabaseError: 数据库操作失败时抛出
             PermissionError: 非商品所有者尝试更新时抛出
         """
-        sql = "{CALL sp_UpdateProduct(?, ?, ?, ?, ?, ?, ?)}"
+        sql = "{CALL sp_UpdateProduct(?, ?, ?, ?, ?, ?, ?, ?)}"
         params = (
             product_id, # Passed as UUID
             owner_id, # Passed as UUID
@@ -82,7 +86,8 @@ class ProductDAL:
             product_name,
             description,
             quantity,
-            price
+            price,
+            condition
         )
         try:
             # Use execute_query for update, check rowcount for success
@@ -259,7 +264,9 @@ class ProductDAL:
         )
 
         try:
+            logger.debug(f"DAL: Executing sp_GetProductList with SQL: {sql} and params: {params}") # 添加这一行
             result = await self._execute_query(conn, sql, params, fetchall=True)
+            logger.info(f"DAL: sp_GetProductList returned: {result}") # 添加这一行
             return result if result is not None else []
         except pyodbc.Error as e:
             logger.error(f"DAL Error getting product list: {e}")
