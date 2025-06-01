@@ -230,7 +230,6 @@ class ProductDAL:
             logger.error(f"Unexpected Error withdrawing product {product_id}: {e}")
             raise e
 
-    # ... existing code ...
     async def get_product_list(self, conn: pyodbc.Connection, category_name: Optional[str] = None, status: Optional[str] = None, 
                                   keyword: Optional[str] = None, min_price: Optional[float] = None, 
                                   max_price: Optional[float] = None, order_by: str = 'PostTime', 
@@ -238,15 +237,14 @@ class ProductDAL:
         """
         获取商品列表，支持多种筛选条件和分页
         """
-        # 修改：直接使用 EXEC 语句调用存储过程，并使用命名参数的问号占位符
-        # 移除了大括号 {}，直接使用 EXEC 语法，并为每个参数使用 ? 占位符
-        sql = "EXEC sp_GetProductList @searchQuery=?, @categoryName=?, @minPrice=?, @maxPrice=?, @page=?, @pageSize=?, @sortBy=?, @sortOrder=?, @status=?, @ownerId=?"
+        # 修改：使用 CALL 语句调用存储过程，使用位置参数的问号占位符
+        sql = "{CALL sp_GetProductList(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}"
             
-            # 确保 status 为空字符串时为 None
+        # 确保 status 为空字符串时为 None
         processed_status = status if status != '' else None
             
-        # 确保 owner_id 为字符串或 None
-        processed_owner_id = str(owner_id) if owner_id else None
+        # 移除：owner_id 的显式字符串转换，让 pyodbc 自动处理 UUID 和 None
+        # processed_owner_id = str(owner_id) if owner_id else None
 
         params = (
             keyword,         # @searchQuery
@@ -258,7 +256,7 @@ class ProductDAL:
             order_by,        # @sortBy
             "DESC",          # @sortOrder
             processed_status,# @status
-            processed_owner_id # @ownerId
+            owner_id         # @ownerId
         )
 
         try:
