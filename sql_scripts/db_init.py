@@ -56,8 +56,7 @@ LOGGING_CONFIG = {
             "()": "uvicorn.logging.DefaultFormatter" if uvicorn and hasattr(uvicorn.logging, "DefaultFormatter") else "logging.Formatter",
             "fmt": "%(levelprefix)s %(asctime)s | %(name)s | %(message)s",
             "datefmt": "%Y-%m-%d %H:%M:%S",
-            "use_colors": True if uvicorn and hasattr(uvicorn.logging, "DefaultFormatter") else False, # Use colors if using uvicorn formatter
-        },
+          },
         # Add access formatter if needed, though less relevant for a script
         # "access": {
         #     "()": "uvicorn.logging.AccessFormatter",
