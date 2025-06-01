@@ -248,7 +248,7 @@ class ProductDAL:
             order_by,        # @sortBy
             "DESC",          # @sortOrder
             status,          # @status
-            owner_id         # @ownerId
+            str(owner_id) if owner_id else None # @ownerId: 转换为字符串或保持None
         )
         try:
             result = await self._execute_query(conn, sql, params, fetchall=True)

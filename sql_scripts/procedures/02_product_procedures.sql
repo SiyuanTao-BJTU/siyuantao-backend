@@ -89,10 +89,10 @@ BEGIN
         @categoryName NVARCHAR(100),
         @minPrice DECIMAL(10, 2),
         @maxPrice DECIMAL(10, 2),
-        @page INT,              -- 对应DAL层传入的 page_number
-        @pageSize INT,          -- 对应DAL层传入的 page_size
-        @sortBy NVARCHAR(50),   -- 对应DAL层传入的 order_by
-        @sortOrder NVARCHAR(10),-- 对应DAL层传入的 "DESC"
+        @page INT,          
+        @pageSize INT,       
+        @sortBy NVARCHAR(50), 
+        @sortOrder NVARCHAR(10),
         @status NVARCHAR(20),
         @ownerId UNIQUEIDENTIFIER,
         @offset INT'; 
@@ -106,8 +106,8 @@ BEGIN
         @maxPrice = @maxPrice,
         @page = @page,
         @pageSize = @pageSize,
-        @sortBy = @sortBy,          -- << 新增这一行
-        @sortOrder = @sortOrder,    -- << 新增这一行
+        @sortBy = @sortBy,        
+        @sortOrder = @sortOrder,   
         @status = @status,
         @ownerId = @ownerId,
         @offset = @offset;
