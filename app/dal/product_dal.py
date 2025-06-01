@@ -243,8 +243,8 @@ class ProductDAL:
         # 确保 status 为空字符串时为 None
         processed_status = status if status != '' else None
             
-        # 移除：owner_id 的显式字符串转换，让 pyodbc 自动处理 UUID 和 None
-        # processed_owner_id = str(owner_id) if owner_id else None
+        # 重新添加：owner_id 的显式字符串转换，解决 pyodbc 在某些环境下的UUID绑定问题
+        processed_owner_id = str(owner_id) if owner_id else None
 
         params = (
             keyword,         # @searchQuery
@@ -256,7 +256,7 @@ class ProductDAL:
             order_by,        # @sortBy
             "DESC",          # @sortOrder
             processed_status,# @status
-            owner_id         # @ownerId
+            processed_owner_id # @ownerId - 现在是字符串或None
         )
 
         try:
