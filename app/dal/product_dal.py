@@ -22,7 +22,7 @@ class ProductDAL:
         self._execute_query = execute_query_func
 
     async def create_product(self, conn: pyodbc.Connection, owner_id: UUID, category_name: str, product_name: str, 
-                            description: str, quantity: int, price: float, image_urls: List[str]) -> UUID: # Added image_urls
+                            description: str, quantity: int, price: float, condition: Optional[str], image_urls: List[str]) -> UUID:
         """
         创建新商品
         
@@ -34,6 +34,7 @@ class ProductDAL:
             description: 商品描述
             quantity: 商品数量
             price: 商品价格
+            condition: 商品成色 (可选)
             image_urls: 图片URL列表
         
         Returns:
@@ -44,20 +45,33 @@ class ProductDAL:
         """
         # Convert list of image URLs to a comma-separated string
         image_urls_str = ",".join(image_urls) if image_urls else None
-        logger.info(f"DAL: Creating product with: owner_id={owner_id}, category_name={category_name}, product_name={product_name}, description={description}, quantity={quantity}, price={price}, image_urls={image_urls_str}")
-        sql = "{CALL sp_CreateProduct(?, ?, ?, ?, ?, ?, ?)}" # Added one more ? for image_urls
-        logger.info(f"DAL: Executing sp_CreateProduct with SQL: {sql}") # 添加这一行
+        logger.info(f"DAL: Creating product with: owner_id={owner_id}, category_name={category_name}, product_name={product_name}, description={description}, quantity={quantity}, price={price}, condition={condition}, image_urls={image_urls_str}")
+        sql = "{CALL sp_CreateProduct(?, ?, ?, ?, ?, ?, ?, ?)}" # Adjusted for 8 parameters
+        logger.info(f"DAL: Executing sp_CreateProduct with SQL: {sql}")
         params = (
-            owner_id, # Passed as UUID
-            product_name, # Changed order to match SP
+            owner_id,
+            product_name,
             description,
-            price,
             quantity,
+            price,
             category_name,
-            image_urls_str # Added image_urls_str
+            condition, # Pass condition to the stored procedure
+            image_urls_str
         )
-        logger.info(f"DAL: Executing sp_CreateProduct with params: {params}") # 添加这一行
-        
+        logger.info(f"DAL: Executing sp_CreateProduct with params: {params}")
+        try:
+            result = await self._execute_query(conn, sql, params, fetchone=True)
+            if result and 'NewProductId' in result:
+                return UUID(result['NewProductId'])
+            else:
+                raise DatabaseError("Failed to retrieve new product ID after creation.")
+        except pyodbc.Error as e:
+            logger.error(f"DAL Error creating product: {e}")
+            raise DALError(f"Database error creating product: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected Error creating product: {e}")
+            raise e
+
     async def update_product(self, conn: pyodbc.Connection, product_id: UUID, current_operator_id: UUID, 
                             category_name: Optional[str], product_name: Optional[str], 
                             description: Optional[str], quantity: Optional[int], 
@@ -597,7 +611,7 @@ class UserFavoriteDAL:
 
     async def remove_user_favorite(self, conn: pyodbc.Connection, user_id: UUID, product_id: UUID) -> None:
         """
-        移除用户收藏
+        用户移除商品收藏
         
         Args:
             conn: 数据库连接对象
@@ -606,20 +620,28 @@ class UserFavoriteDAL:
         
         Raises:
             DatabaseError: 数据库操作失败时抛出
+            NotFoundError: 尝试移除不存在的收藏时（如果存储过程这样设计）
         """
-        sql = "{CALL sp_RemoveUserFavorite(?, ?)}"
-        params = (user_id, product_id) # Passed as UUID
+        sql = "{CALL sp_RemoveFavoriteProduct(?, ?)}" # Corrected stored procedure name
+        params = (user_id, product_id)
         try:
+            # Use execute_query for delete, check rowcount for success
             rowcount = await self._execute_query(conn, sql, params, fetchone=False, fetchall=False)
-            if rowcount == 0:
-                logger.warning(f"DAL: Remove favorite for user {user_id}, product {product_id} returned 0 rows affected, possibly not found.")
-                raise NotFoundError("Favorite not found.")
-            logger.info(f"DAL: User {user_id} removed favorite product {product_id}")
+            # sp_RemoveFavoriteProduct 在找不到记录时会 RAISERROR
+            # 因此，如果执行到这里，意味着操作成功（即使 rowcount 可能不总是可靠）
+            # 如果没有删除任何行，SP 应该会报错
+            logger.info(f"DAL: User {user_id} removed favorite product {product_id}. Rowcount: {rowcount if rowcount is not None else 'N/A'}")
         except pyodbc.Error as e:
+            # 检查是否是因为 "记录不存在" 类型的错误
+            # SQL Server 错误号 50000 通常用于 RAISERROR
+            if e.args[0] == '42000' and '该商品不在您的收藏列表中' in str(e): # 假设SP会抛出这个信息
+                logger.warning(f"DAL: Attempt to remove non-existent favorite for user {user_id}, product {product_id}.")
+                # 可以选择在这里转换为 NotFoundError，或者让 Service 层处理
+                raise NotFoundError(f"Favorite entry not found for user {user_id} and product {product_id}.") from e
             logger.error(f"DAL Error removing user favorite for user {user_id}, product {product_id}: {e}")
             raise DALError(f"Database error removing user favorite: {e}") from e
         except Exception as e:
-            logger.error(f"Unexpected Error removing user favorite for user {user_id}, product {product_id}: {e}")
+            logger.error(f"Unexpected Error removing user favorite {product_id} for user {user_id}: {e}")
             raise e
 
     async def get_user_favorite_products(self, conn: pyodbc.Connection, user_id: UUID) -> List[Dict]:

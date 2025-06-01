@@ -286,17 +286,29 @@ BEGIN
     -- 检查商品是否存在 (SQL语句1)
     SELECT @productOwnerId = OwnerID FROM [Product] WHERE ProductID = @productId;
 
-    -- 使用 IF 进行控制流
     IF @productOwnerId IS NULL
     BEGIN
         RAISERROR('商品不存在', 16, 1);
         RETURN;
     END
 
-    -- 如果不是管理员调用，则检查所有权
     IF @invokedByAdmin = 0 AND @productOwnerId != @userId
     BEGIN
         RAISERROR('无权删除此商品，您不是该商品的发布者。', 16, 1);
+        RETURN;
+    END
+
+    -- 检查商品是否存在于任何订单中
+    IF EXISTS (SELECT 1 FROM [Order] WHERE ProductID = @productId)
+    BEGIN
+        RAISERROR('无法删除商品，因为它已关联到一个或多个订单。请先处理相关订单。', 16, 1);
+        RETURN;
+    END
+
+    -- 检查商品是否存在于任何用户的收藏夹中
+    IF EXISTS (SELECT 1 FROM [UserFavorite] WHERE ProductID = @productId)
+    BEGIN
+        RAISERROR('无法删除商品，因为它已被一个或多个用户收藏。请先通知用户或进行其他处理。', 16, 1);
         RETURN;
     END
 
@@ -773,6 +785,259 @@ BEGIN
         IF @@TRANCOUNT > 0
             ROLLBACK TRANSACTION;
         THROW;
+    END CATCH
+END;
+GO
+
+-- 删除指定商品的所有图片
+DROP PROCEDURE IF EXISTS [sp_DeleteProductImagesByProductId];
+GO
+CREATE PROCEDURE [sp_DeleteProductImagesByProductId]
+    @productId UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM [ProductImage]
+    WHERE ProductID = @productId;
+    SELECT @@ROWCOUNT AS DeletedImageCount; -- 可以选择返回删除了多少张图片
+END;
+GO
+
+DROP PROCEDURE IF EXISTS [sp_CreateProduct];
+GO
+CREATE PROCEDURE [sp_CreateProduct]
+    @ownerId UNIQUEIDENTIFIER,
+    @productName NVARCHAR(200),
+    @description NVARCHAR(MAX),
+    @quantity INT,
+    @price FLOAT,
+    @categoryName NVARCHAR(100),
+    @condition NVARCHAR(50), -- 新增成色参数
+    @imageUrls NVARCHAR(MAX) = NULL -- 逗号分隔的图片URL字符串
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON; -- 遇到错误自动回滚
+
+    DECLARE @productId UNIQUEIDENTIFIER = NEWID();
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- 插入商品信息
+        INSERT INTO [Product] (ProductID, OwnerID, ProductName, Description, Quantity, Price, PostTime, Status, CategoryName, Condition) -- 添加 Condition 列
+        VALUES (@productId, @ownerId, @productName, @description, @quantity, @price, GETDATE(), 'PendingReview', @categoryName, @condition); -- 默认状态为 PendingReview
+
+        -- 处理图片URL
+        IF @imageUrls IS NOT NULL AND LTRIM(RTRIM(@imageUrls)) <> ''
+        BEGIN
+            DECLARE @imageUrl NVARCHAR(MAX);
+            DECLARE @pos INT;
+            DECLARE @currentSortOrder INT = 0;
+
+            SET @imageUrls = LTRIM(RTRIM(@imageUrls)) + ','; -- Ensure it ends with a comma
+            SET @pos = CHARINDEX(',', @imageUrls, 1);
+
+            WHILE @pos > 0
+            BEGIN
+                SET @imageUrl = LTRIM(RTRIM(SUBSTRING(@imageUrls, 1, @pos - 1)));
+
+                IF @imageUrl <> ''
+                BEGIN
+                    INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, UploadTime, SortOrder)
+                    VALUES (NEWID(), @productId, @imageUrl, GETDATE(), @currentSortOrder);
+                    SET @currentSortOrder = @currentSortOrder + 1;
+                END
+
+                SET @imageUrls = SUBSTRING(@imageUrls, @pos + 1, LEN(@imageUrls));
+                SET @pos = CHARINDEX(',', @imageUrls, 1);
+            END
+        END
+
+        COMMIT TRANSACTION;
+
+        SELECT @productId AS NewProductId; -- 返回新生成的商品ID
+
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+        THROW; -- 重新抛出捕获的错误
+    END CATCH
+END;
+GO
+
+-- sp_ActivateProduct: 管理员激活商品
+-- 输入: @productId UNIQUEIDENTIFIER, @adminId UNIQUEIDENTIFIER
+DROP PROCEDURE IF EXISTS [sp_ActivateProduct];
+GO
+CREATE PROCEDURE [sp_ActivateProduct]
+    @productId UNIQUEIDENTIFIER,
+    @adminId UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    -- 检查商品是否存在
+    IF NOT EXISTS (SELECT 1 FROM [Product] WHERE ProductID = @productId)
+    BEGIN
+        RAISERROR('商品不存在。', 16, 1);
+        RETURN;
+    END
+
+    -- 检查是否已是Active状态
+    IF (SELECT Status FROM [Product] WHERE ProductID = @productId) = 'Active'
+    BEGIN
+        RAISERROR('商品已是上架状态，无需重复操作。', 16, 1);
+        RETURN;
+    END
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE [Product]
+        SET Status = 'Active'
+        WHERE ProductID = @productId;
+
+        -- 记录审核操作（可选，但推荐用于审计）
+        -- INSERT INTO [AuditLog] (Action, EntityType, EntityId, ActorId, Timestamp, Details)
+        -- VALUES ('ProductActivated', 'Product', @productId, @adminId, GETDATE(), N'商品审核通过并上架。');
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+        DECLARE @ErrorMessage NVARCHAR(MAX) = ERROR_MESSAGE();
+        DECLARE @ErrorSeverity INT = ERROR_SEVERITY();
+        DECLARE @ErrorState INT = ERROR_STATE();
+        RAISERROR(@ErrorMessage, @ErrorSeverity, @ErrorState);
+    END CATCH
+END;
+GO
+
+DROP PROCEDURE IF EXISTS [sp_RejectProduct];
+GO
+CREATE PROCEDURE [sp_RejectProduct]
+    @productId UNIQUEIDENTIFIER,
+    @adminId UNIQUEIDENTIFIER,
+    @reason NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM [Product] WHERE ProductID = @productId)
+    BEGIN
+        RAISERROR('商品不存在。', 16, 1);
+        RETURN;
+    END;
+
+    IF (SELECT Status FROM [Product] WHERE ProductID = @productId) = 'Rejected'
+    BEGIN
+        RAISERROR('商品已是拒绝状态，无需重复操作。', 16, 1);
+        RETURN;
+    END;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE [Product]
+        SET
+            Status = 'Rejected',
+            AuditReason = @reason
+        WHERE ProductID = @productId;
+
+        -- 记录审核操作
+        -- INSERT INTO [AuditLog] (Action, EntityType, EntityId, ActorId, Timestamp, Details)
+        -- VALUES ('ProductRejected', 'Product', @productId, @adminId, GETDATE(), N'商品审核被拒绝。原因：' + ISNULL(@reason, '无'));
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+        DECLARE @ErrorMessage NVARCHAR(MAX) = ERROR_MESSAGE();
+        DECLARE @ErrorSeverity INT = ERROR_SEVERITY();
+        DECLARE @ErrorState INT = ERROR_STATE();
+        RAISERROR(@ErrorMessage, @ErrorSeverity, @ErrorState);
+    END CATCH
+END;
+GO
+
+DROP PROCEDURE IF EXISTS [sp_BatchActivateProducts];
+GO
+CREATE PROCEDURE [sp_BatchActivateProducts]
+    @productIds NVARCHAR(MAX), -- 逗号分隔的ProductID字符串
+    @adminId UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- 使用 STRING_SPLIT 来解析逗号分隔的ProductID字符串
+        UPDATE P
+        SET P.Status = 'Active'
+        FROM [Product] P
+        JOIN STRING_SPLIT(@productIds, ',') AS IDList ON P.ProductID = TRY_CAST(IDList.value AS UNIQUEIDENTIFIER)
+        WHERE P.Status = 'PendingReview'; -- 只激活待审核的商品
+
+        -- 记录批量审核操作
+        -- INSERT INTO [AuditLog] (Action, EntityType, EntityId, ActorId, Timestamp, Details)
+        -- VALUES ('BatchProductActivated', 'Product', NULL, @adminId, GETDATE(), N'批量商品审核通过并上架。产品ID：' + @productIds);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+        DECLARE @ErrorMessage NVARCHAR(MAX) = ERROR_MESSAGE();
+        DECLARE @ErrorSeverity INT = ERROR_SEVERITY();
+        DECLARE @ErrorState INT = ERROR_STATE();
+        RAISERROR(@ErrorMessage, @ErrorSeverity, @ErrorState);
+    END CATCH
+END;
+GO
+
+DROP PROCEDURE IF EXISTS [sp_BatchRejectProducts];
+GO
+CREATE PROCEDURE [sp_BatchRejectProducts]
+    @productIds NVARCHAR(MAX), -- 逗号分隔的ProductID字符串
+    @adminId UNIQUEIDENTIFIER,
+    @reason NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE P
+        SET
+            P.Status = 'Rejected',
+            P.AuditReason = @reason
+        FROM [Product] P
+        JOIN STRING_SPLIT(@productIds, ',') AS IDList ON P.ProductID = TRY_CAST(IDList.value AS UNIQUEIDENTIFIER)
+        WHERE P.Status = 'PendingReview'; -- 只拒绝待审核的商品
+
+        -- 记录批量审核操作
+        -- INSERT INTO [AuditLog] (Action, EntityType, EntityId, ActorId, Timestamp, Details)
+        -- VALUES ('BatchProductRejected', 'Product', NULL, @adminId, GETDATE(), N'批量商品审核被拒绝。产品ID：' + @productIds + N'. 原因：' + ISNULL(@reason, '无'));
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+        DECLARE @ErrorMessage NVARCHAR(MAX) = ERROR_MESSAGE();
+        DECLARE @ErrorSeverity INT = ERROR_SEVERITY();
+        DECLARE @ErrorState INT = ERROR_STATE();
+        RAISERROR(@ErrorMessage, @ErrorSeverity, @ErrorState);
     END CATCH
 END;
 GO

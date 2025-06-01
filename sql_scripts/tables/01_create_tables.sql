@@ -45,6 +45,7 @@ CREATE TABLE [Product] (
     [PostTime] DATETIME NOT NULL DEFAULT GETDATE(),             -- 商品发布时间，不允许为空，默认当前系统时间
     [Status] NVARCHAR(20) NOT NULL DEFAULT 'PendingReview'      -- 商品当前状态，默认为'PendingReview'
         CHECK ([Status] IN ('PendingReview', 'Rejected', 'Active', 'Sold', 'Withdrawn')), -- PendingReview (待审核) Rejected (管理员已拒绝) Active (在售) Sold (已售罄) Withdrawn (下架) 
+    [AuditReason] NVARCHAR(MAX) NULL, -- 新增，审核拒绝原因
     CONSTRAINT FK_Product_Owner FOREIGN KEY ([OwnerID]) REFERENCES [User]([UserID]) ON DELETE CASCADE -- 外键关联User表，当用户删除时，其所有商品也删除
 );
 GO

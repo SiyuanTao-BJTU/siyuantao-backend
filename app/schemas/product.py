@@ -18,6 +18,7 @@ class ProductBase(BaseModel):
 
 class ProductCreate(ProductBase):
     image_urls: List[str] = Field(default_factory=list)
+    condition: Optional[str] = None
 
 class ProductUpdate(BaseModel):
     category_name: Optional[str] = None

@@ -57,38 +57,17 @@ async def get_user_favorites(
 
 @router.get("/", response_model=List[dict], summary="获取商品列表", tags=["Products"])
 @router.get("", response_model=List[dict], summary="获取商品列表 (无斜杠)", include_in_schema=False)
-async def get_product_list(category_name: str = None, product_status: str = None, keyword: str = None, min_price: float = None, max_price: float = None, order_by: str = 'PostTime', page_number: int = 1, page_size: int = 10,
+async def get_product_list(category_name: str = None, status: str = None, keyword: str = None, min_price: float = None, max_price: float = None, order_by: str = 'PostTime', page_number: int = 1, page_size: int = 10,
                             product_service: ProductService = Depends(get_product_service),
                             conn: pyodbc.Connection = Depends(get_db_connection),
                             owner_id: Optional[UUID] = None): # 添加 owner_id 参数
-    """
-    获取商品列表，支持多种筛选条件和分页
-    
-    Args:
-        category_name: 商品分类名称
-        product_status: 商品状态 (重命名以避免与 fastapi.status 冲突)
-        keyword: 搜索关键词
-        min_price: 最低价格
-        max_price: 最高价格
-        order_by: 排序字段
-        page_number: 页码
-        page_size: 每页数量
-        product_service: 商品服务依赖
-        conn: 数据库连接
-        owner_id: 商品所有者ID (可选)
-    
-    Returns:
-        商品列表
-    
-    Raises:
-        HTTPException: 获取失败时返回相应的HTTP错误
-    """
+    logger.info(f"Router: get_product_list called with status={status}, category_name={category_name}, keyword={keyword}")
     try:
         # 如果提供了 owner_id，则忽略 product_status 过滤，只按 owner_id 过滤
         if owner_id:
             products = await product_service.get_product_list(conn, category_name, None, keyword, min_price, max_price, order_by, page_number, page_size, owner_id)
         else:
-            products = await product_service.get_product_list(conn, category_name, product_status, keyword, min_price, max_price, order_by, page_number, page_size, owner_id)
+            products = await product_service.get_product_list(conn, category_name, status, keyword, min_price, max_price, order_by, page_number, page_size, owner_id)
         return products
     except (ValueError, DALError) as e:
         logger.error(f"Error getting product list: {e}")
@@ -117,7 +96,7 @@ async def create_product(product: ProductCreate, user: dict = Depends(get_curren
         HTTPException: 创建失败时返回相应的HTTP错误
     """
     return await product_service.create_product(conn, user['user_id'], product.category_name, product.product_name, 
-                                              product.description, product.quantity, product.price, product.image_urls)
+                                              product.description, product.quantity, product.price, product.condition, product.image_urls)
 
 @router.put("/{product_id}", status_code=fastapi_status.HTTP_204_NO_CONTENT)
 async def update_product(
