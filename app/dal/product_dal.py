@@ -243,8 +243,7 @@ class ProductDAL:
         # 确保 status 为空字符串时为 None
         processed_status = status if status != '' else None
             
-        # 重新添加：owner_id 的显式字符串转换，解决 pyodbc 在某些环境下的UUID绑定问题
-        processed_owner_id = str(owner_id) if owner_id else None
+        processed_owner_id = owner_id # if owner_id else None # Removed str() conversion
 
         params = (
             keyword,         # @searchQuery
