@@ -83,14 +83,16 @@ BEGIN
     -- 添加分页子句
     SET @sql = @sql + ' OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;';
 
-    -- 构建参数定义 (新增 @ownerId)
+        -- 构建参数定义 (新增 @ownerId)
     SET @paramDefinition = '
         @searchQuery NVARCHAR(200),
         @categoryName NVARCHAR(100),
         @minPrice DECIMAL(10, 2),
         @maxPrice DECIMAL(10, 2),
-        @offset INT,
-        @pageSize INT,
+        @page INT,              -- 对应DAL层传入的 page_number
+        @pageSize INT,          -- 对应DAL层传入的 page_size
+        @sortBy NVARCHAR(50),   -- 对应DAL层传入的 order_by
+        @sortOrder NVARCHAR(10),-- 对应DAL层传入的 "DESC"
         @status NVARCHAR(20),
         @ownerId UNIQUEIDENTIFIER'; -- 添加 @ownerId 这里
 
@@ -101,10 +103,12 @@ BEGIN
         @categoryName = @categoryName,
         @minPrice = @minPrice,
         @maxPrice = @maxPrice,
-        @offset = @offset,
+        @page = @page,
         @pageSize = @pageSize,
+        @sortBy = @sortBy,          -- << 新增这一行
+        @sortOrder = @sortOrder,    -- << 新增这一行
         @status = @status,
-        @ownerId = @ownerId; -- 传递 @ownerId 这里
+        @ownerId = @ownerId;
 
 END;
 GO
