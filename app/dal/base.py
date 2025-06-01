@@ -38,16 +38,7 @@ async def execute_query(
         logger.debug(f"Executing SQL: {sql} with params: {params}")
 
         # 转换 UUID 对象为字符串，因为 pyodbc 可能不支持直接绑定 UUID 对象
-        processed_params = []
-        if params:
-            for p in params:
-                if isinstance(p, UUID):
-                    processed_params.append(str(p))
-                else:
-                    processed_params.append(p)
-            processed_params = tuple(processed_params)
-        else:
-            processed_params = None
+        processed_params = tuple(str(p) if isinstance(p, UUID) else p for p in params) if params is not None else None
 
         # 在线程池中执行 SQL 语句 (cursor.execute 是同步操作)
         if processed_params is not None:
@@ -129,16 +120,7 @@ async def execute_non_query(conn: pyodbc.Connection, sql: str, params: tuple = (
         cursor = await loop.run_in_executor(None, conn.cursor)
         logger.debug(f"Executing non-query SQL: {sql} with params: {params}")
 
-        processed_params = []
-        if params:
-            for p in params:
-                if isinstance(p, UUID):
-                    processed_params.append(str(p))
-                else:
-                    processed_params.append(p)
-            processed_params = tuple(processed_params)
-        else:
-            processed_params = None
+        processed_params = tuple(str(p) if isinstance(p, UUID) else p for p in params) if params is not None else None
 
         if processed_params is not None:
             await loop.run_in_executor(None, functools.partial(cursor.execute, sql, processed_params))
