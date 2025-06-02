@@ -159,8 +159,8 @@ CREATE TABLE [UserFavorite] (
     [UserID] UNIQUEIDENTIFIER NOT NULL,                       -- 收藏商品的用户ID，不允许为空
     [ProductID] UNIQUEIDENTIFIER NOT NULL,                    -- 被收藏的商品ID，不允许为空
     [FavoriteTime] DATETIME NOT NULL DEFAULT GETDATE(),       -- 收藏时间，不允许为空，默认当前系统时间
-    CONSTRAINT FK_UserFavorite_User FOREIGN KEY ([UserID]) REFERENCES [User]([UserID]) ON DELETE CASCADE, -- 外键关联用户，用户删除时收藏记录删除
-    CONSTRAINT FK_UserFavorite_Product FOREIGN KEY ([ProductID]) REFERENCES [Product]([ProductID]) ON DELETE NO ACTION, -- 外键关联商品，商品删除时如果存在关联收藏记录则操作失败
+    CONSTRAINT FK_UserFavorite_User FOREIGN KEY ([UserID]) REFERENCES [User]([UserID]) ON DELETE NO ACTION, -- 外键关联用户，用户删除时收藏记录删除
+    CONSTRAINT FK_UserFavorite_Product FOREIGN KEY ([ProductID]) REFERENCES [Product]([ProductID]) ON DELETE CASCADE, -- 外键关联商品，商品删除时如果存在关联收藏记录则操作失败
     CONSTRAINT UQ_UserFavorite_UserProduct UNIQUE ([UserID], [ProductID]) -- 复合唯一约束，确保一个用户不能重复收藏同一个商品
 );
 GO

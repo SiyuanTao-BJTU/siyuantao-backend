@@ -56,22 +56,20 @@ CREATE PROCEDURE [sp_GetProductList]
     @minPrice DECIMAL(10, 2) = NULL,
     @maxPrice DECIMAL(10, 2) = NULL,
     @page INT = 1,
-    @pageSize INT = 20,
-    @sortBy NVARCHAR(50) = 'PostTime', -- 默认按发布时间排序
-    @sortOrder NVARCHAR(10) = 'DESC',  -- 默认降序
-    @status NVARCHAR(20) = NULL,   -- 默认值改为 NULL
-    @ownerId UNIQUEIDENTIFIER = NULL -- 新增参数，用于按所有者过滤
+    @pageSize INT = 10,
+    @sortBy NVARCHAR(50) = 'PostTime',
+    @sortOrder NVARCHAR(10) = 'DESC',
+    @status NVARCHAR(20) = NULL, -- 可以是 'Active', 'PendingReview', 'Rejected', 'Sold', 'Withdrawn', 或 '_FETCH_ALL_PRODUCTS_'
+    @ownerId NVARCHAR(36) = NULL -- 将 UNIQUEIDENTIFIER 改为 NVARCHAR(36)
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- 声明变量
-    DECLARE @sql NVARCHAR(MAX);
     DECLARE @offset INT = (@page - 1) * @pageSize;
+    DECLARE @sql NVARCHAR(MAX);
     DECLARE @paramDefinition NVARCHAR(MAX);
 
-    -- 构建基础查询和WHERE子句
-    SET @sql = '
+    SET @sql = N'
     SELECT
         p.ProductID AS 商品ID,
         p.ProductName AS 商品名称,
@@ -90,8 +88,8 @@ BEGIN
     WHERE 1=1';
 
     -- 新增：添加过滤条件（按 ownerId 或按 status 过滤）
-    IF @ownerId IS NOT NULL
-        SET @sql = @sql + ' AND p.OwnerID = @ownerId';
+    IF @ownerId IS NOT NULL AND @ownerId <> ''
+        SET @sql = @sql + ' AND p.OwnerID = CONVERT(UNIQUEIDENTIFIER, @ownerId)'; -- 显式转换
     ELSE IF @status IS NOT NULL AND @status <> '' AND @status <> '_FETCH_ALL_PRODUCTS_'
         -- 仅在 ownerId 为 NULL 且 status 提供且不为特殊值时应用 status 过滤
         SET @sql = @sql + ' AND p.Status = @status';
@@ -130,7 +128,7 @@ BEGIN
     SET @sql = @sql + ' OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;';
 
         -- 构建参数定义 (新增 @ownerId)
-    SET @paramDefinition = '
+    SET @paramDefinition = N'
         @searchQuery NVARCHAR(200),
         @categoryName NVARCHAR(100),
         @minPrice DECIMAL(10, 2),
@@ -140,7 +138,7 @@ BEGIN
         @sortBy NVARCHAR(50), 
         @sortOrder NVARCHAR(10),
         @status NVARCHAR(20),
-        @ownerId UNIQUEIDENTIFIER,
+        @ownerId NVARCHAR(36), -- 将 UNIQUEIDENTIFIER 改为 NVARCHAR(36)
         @offset INT'; 
 
     -- 执行动态SQL (新增 @ownerId 参数的传递)
