@@ -38,40 +38,22 @@ async def execute_query(
     loop = asyncio.get_event_loop()
     cursor = await loop.run_in_executor(None, conn.cursor)
 
-    # Convert UUID objects in params to their string representation
-    # and ensure they are properly cast/converted in the SQL if needed.
-    # This assumes that SQL Server's UNIQUEIDENTIFIER will accept string literals.
-    # For the `?` placeholder, pyodbc should handle the string conversion correctly.
-    processed_params = []
-    if params:
-        for p in params:
-            if isinstance(p, UUID):
-                processed_params.append(str(p))  # Convert UUID to string
-            else:
-                processed_params.append(p)
-    
-    # log_params = ", ".join([f"{p} (Type: {type(p)})" for p in processed_params])
-    # logger.debug(f"Executing SQL: {sql}... with params: ({log_params})")
-    logger.debug(f"Executing SQL: {sql}... with params: {processed_params}")
-
     try:
-        await loop.run_in_executor(None, cursor.execute, sql, tuple(processed_params))
-        
+        await loop.run_in_executor(None, cursor.execute, sql, params if params is not None else ())
+
         if fetchone:
-            row = await loop.run_in_executor(None, cursor.fetchone)
-            return dict(zip([column[0] for column in cursor.description], row)) if row else None
-        elif fetchall:
-            rows = await loop.run_in_executor(None, cursor.fetchall)
             columns = [column[0] for column in cursor.description]
-            return [dict(zip(columns, row)) for row in rows]
-        else: # For non-query operations, return rowcount (handled by execute_non_query mostly)
-            return await loop.run_in_executor(None, lambda: cursor.rowcount)
-    except pyodbc.ProgrammingError as e:
-        logger.error(f"DAL execute_query error: {e} (SQL: {sql}..., Params: {processed_params})")
+            row = await loop.run_in_executor(None, cursor.fetchone)
+            return dict(zip(columns, row)) if row else None
+        elif fetchall:
+            columns = [column[0] for column in cursor.description]
+            rows = await loop.run_in_executor(None, cursor.fetchall)
+            return [dict(zip(columns, row)) for row in rows] if rows else []
+        else:
+            return await loop.run_in_executor(None, lambda: cursor.rowcount) # Return rowcount for non-query operations
+    except pyodbc.Error as e:
+        logger.error(f"DAL execute_query error: {e} (SQL: {sql}, Params: {params})")
         raise map_db_exception(e) from e
-    except Exception as e:
-        logger.error(f"An unexpected error occurred during DAL execute_query: {e}", exc_info=True)
-        raise DatabaseError(f"An unexpected database error occurred: {e}") from e
     finally:
         await loop.run_in_executor(None, cursor.close)
 
@@ -90,26 +72,12 @@ async def execute_non_query(conn: pyodbc.Connection, sql: str, params: tuple = (
     loop = asyncio.get_event_loop()
     cursor = await loop.run_in_executor(None, conn.cursor)
 
-    processed_params = []
-    if params:
-        for p in params:
-            if isinstance(p, UUID):
-                processed_params.append(str(p)) # Convert UUID to string
-            else:
-                processed_params.append(p)
-    
-    logger.debug(f"Executing SQL (non-query): {sql}... with params: {processed_params}")
-
     try:
-        await loop.run_in_executor(None, cursor.execute, sql, tuple(processed_params))
-        rowcount = await loop.run_in_executor(None, lambda: cursor.rowcount)
-        return rowcount
-    except pyodbc.ProgrammingError as e:
-        logger.error(f"DAL execute_non_query error: {e} (SQL: {sql}..., Params: {processed_params})")
+        await loop.run_in_executor(None, cursor.execute, sql, params if params is not None else ())
+        return await loop.run_in_executor(None, lambda: cursor.rowcount)
+    except pyodbc.Error as e:
+        logger.error(f"DAL execute_non_query error: {e} (SQL: {sql}, Params: {params})")
         raise map_db_exception(e) from e
-    except Exception as e:
-        logger.error(f"An unexpected error occurred during DAL execute_non_query: {e}", exc_info=True)
-        raise DatabaseError(f"An unexpected database error occurred: {e}") from e
     finally:
         await loop.run_in_executor(None, cursor.close)
 

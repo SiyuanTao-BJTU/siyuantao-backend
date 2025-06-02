@@ -274,15 +274,13 @@ class ProductDAL:
         """
         获取商品列表，支持多种筛选条件和分页
         """
-        # 修改：使用 CALL 语句调用存储过程，使用位置参数的问号占位符
-        sql = "{CALL sp_GetProductList(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}"
-            
+        logger.debug(f"DAL.get_product_list called with: category_name={category_name}, status={status}, keyword={keyword}, min_price={min_price}, max_price={max_price}, order_by={order_by}, page_number={page_number}, page_size={page_size}, owner_id={owner_id}")
+
         # 确保 status 为空字符串时为 None
         processed_status = status if status != '' else None
-            
-        processed_owner_id = owner_id # if owner_id else None # Removed str() conversion
+        logger.debug(f"DAL.get_product_list: Processed status: {processed_status}")
 
-        params = (
+        initial_params = (
             keyword,         # @searchQuery
             category_name,   # @categoryName
             min_price,       # @minPrice
@@ -291,13 +289,24 @@ class ProductDAL:
             page_size,       # @pageSize
             order_by,        # @sortBy
             "DESC",          # @sortOrder
-            processed_status,# @status
-            processed_owner_id # @ownerId - 现在是字符串或None
+            processed_status # @status
         )
 
+        # 根据 owner_id 是否存在来调整 SQL 语句和参数
+        if owner_id is not None:
+            logger.debug(f"DAL.get_product_list: owner_id is not None ({owner_id}). Passing UUID directly.")
+            sql = "{CALL sp_GetProductList(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}" # 10个参数，owner_id作为最后一个参数
+            params_to_execute = initial_params + (owner_id,)
+            logger.debug(f"DAL.get_product_list: Parameters for execution: {params_to_execute}")
+        else:
+            logger.debug("DAL.get_product_list: owner_id is None. Appending None to parameters.")
+            sql = "{CALL sp_GetProductList(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}" # 10个参数，最后一个是NULL for @ownerId
+            params_to_execute = initial_params + (None,)
+            logger.debug(f"DAL.get_product_list: Parameters for execution: {params_to_execute}")
+
         try:
-            logger.debug(f"DAL: Executing sp_GetProductList with SQL: {sql} and params: {params}") # 添加这一行
-            result = await self._execute_query(conn, sql, params, fetchall=True)
+            logger.debug(f"DAL: Executing sp_GetProductList with SQL: {sql} and params: {params_to_execute}") # 添加这一行
+            result = await self._execute_query(conn, sql, params_to_execute, fetchall=True)
             logger.info(f"DAL: sp_GetProductList returned: {result}") # 添加这一行
             return result if result is not None else []
         except pyodbc.Error as e:
@@ -306,6 +315,7 @@ class ProductDAL:
         except Exception as e:
             logger.error(f"Unexpected Error getting product list: {e}")
             raise e
+
     async def get_product_by_id(self, conn: pyodbc.Connection, product_id: UUID) -> Optional[Dict]:
         """
         根据商品ID获取商品详情
