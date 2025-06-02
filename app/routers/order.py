@@ -15,7 +15,7 @@ from app.exceptions import IntegrityError, ForbiddenError, NotFoundError, DALErr
 
 router = APIRouter()
 
-@router.post("/", response_model=OrderResponseSchema, status_code=fastapi.status.HTTP_201_CREATED)
+@router.post("/", response_model=OrderResponseSchema, status_code=fastapi.status.HTTP_201_CREATED, response_model_by_alias=False)
 async def create_new_order(
     order_data: OrderCreateSchema,
     current_user: dict = Depends(get_current_user),
@@ -26,7 +26,7 @@ async def create_new_order(
     创建一个新订单，需要用户登录。
     对应存储过程: `sp_CreateOrder` (通过Service层调用)
     """
-    user_id_str = current_user.get("user_id")
+    user_id_str = current_user.get("用户ID")
     if not user_id_str:
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
     
@@ -49,7 +49,7 @@ async def create_new_order(
         # 捕获其他未预期错误
         raise HTTPException(status_code=fastapi.status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.put("/{order_id}/status", response_model=OrderResponseSchema)
+@router.put("/{order_id}/status", response_model=OrderResponseSchema, response_model_by_alias=False)
 async def update_order_status_route(
     status_update: OrderStatusUpdateSchema, # Body first
     order_id: uuid.UUID = Path(..., title="The ID of the order to update"), # Path param with default
@@ -62,7 +62,7 @@ async def update_order_status_route(
     需要用户登录，并验证用户是否有权限操作该订单 (通常是买家或卖家)。
     对应存储过程: `sp_ConfirmOrder`, `sp_CompleteOrder`, `sp_RejectOrder` (通过Service层调用)
     """
-    user_id_str = current_user.get("user_id")
+    user_id_str = current_user.get("用户ID")
     if not user_id_str:
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
@@ -89,7 +89,7 @@ async def update_order_status_route(
     except Exception as e:
         raise HTTPException(status_code=fastapi.status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.get("/mine", response_model=List[OrderResponseSchema])
+@router.get("/mine", response_model=List[OrderResponseSchema], response_model_by_alias=False)
 async def get_my_orders(
     current_user: dict = Depends(get_current_user),
     conn: pyodbc.Connection = Depends(get_db_connection),
@@ -102,7 +102,7 @@ async def get_my_orders(
     获取当前登录用户的所有订单列表 (作为买家或卖家)。
     对应存储过程: `sp_GetOrdersByUser` (通过Service层调用)
     """
-    user_id_str = current_user.get("user_id")
+    user_id_str = current_user.get("用户ID")
     if not user_id_str:
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
@@ -118,7 +118,7 @@ async def get_my_orders(
     except Exception as e:
         raise HTTPException(status_code=fastapi.status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.get("/{order_id}", response_model=OrderResponseSchema) # Added GET for single order retrieval
+@router.get("/{order_id}", response_model=OrderResponseSchema, response_model_by_alias=False)
 async def get_order_by_id_route(
     order_id: uuid.UUID = Path(..., title="The ID of the order to retrieve"),
     current_user: dict = Depends(get_current_user),
@@ -128,7 +128,7 @@ async def get_order_by_id_route(
     """
     根据ID获取单个订单详情。
     """
-    user_id_str = current_user.get("user_id")
+    user_id_str = current_user.get("用户ID")
     if not user_id_str:
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
@@ -164,7 +164,7 @@ async def delete_order_route(
     需要用户登录，并验证用户是否有权限删除该订单。
     对应存储过程: `sp_DeleteOrder` (通过Service层调用)
     """
-    user_id_str = current_user.get("user_id")
+    user_id_str = current_user.get("用户ID")
     if not user_id_str:
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
@@ -199,7 +199,7 @@ async def cancel_order_route(
     需要用户登录，并验证用户是否有权限取消该订单。
     对应存储过程: `sp_CancelOrder` (通过Service层调用)
     """
-    user_id_str = current_user.get("user_id")
+    user_id_str = current_user.get("用户ID")
     if not user_id_str:
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
@@ -226,7 +226,7 @@ async def cancel_order_route(
     except Exception as e:
         raise HTTPException(status_code=fastapi.status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.put("/{order_id}/confirm", response_model=OrderResponseSchema)
+@router.put("/{order_id}/confirm", response_model=OrderResponseSchema, response_model_by_alias=False)
 async def confirm_order_route(
     order_id: uuid.UUID = Path(..., title="The ID of the order to confirm"),
     current_user: dict = Depends(get_current_user),
@@ -236,7 +236,7 @@ async def confirm_order_route(
     """
     确认一个订单。
     """
-    user_id_str = current_user.get("user_id")
+    user_id_str = current_user.get("用户ID")
     if not user_id_str:
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
     
@@ -258,7 +258,7 @@ async def confirm_order_route(
         raise HTTPException(status_code=fastapi.status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
 
-@router.put("/{order_id}/complete", response_model=OrderResponseSchema)
+@router.put("/{order_id}/complete", response_model=OrderResponseSchema, response_model_by_alias=False)
 async def complete_order_route(
     order_id: uuid.UUID = Path(..., title="The ID of the order to complete"),
     current_user: dict = Depends(get_current_user),
@@ -268,7 +268,7 @@ async def complete_order_route(
     """
     完成一个订单。
     """
-    user_id_str = current_user.get("user_id")
+    user_id_str = current_user.get("用户ID")
     if not user_id_str:
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
@@ -290,7 +290,7 @@ async def complete_order_route(
         raise HTTPException(status_code=fastapi.status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
 
-@router.put("/{order_id}/reject", response_model=OrderResponseSchema)
+@router.put("/{order_id}/reject", response_model=OrderResponseSchema, response_model_by_alias=False)
 async def reject_order_route(
     order_id: uuid.UUID = Path(..., title="The ID of the order to reject"),
     current_user: dict = Depends(get_current_user),
@@ -301,7 +301,7 @@ async def reject_order_route(
     """
     拒绝一个订单。
     """
-    user_id_str = current_user.get("user_id")
+    user_id_str = current_user.get("用户ID")
     if not user_id_str:
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 

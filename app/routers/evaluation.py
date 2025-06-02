@@ -11,7 +11,7 @@ from app.dal.connection import get_db_connection # 导入 get_db_connection
 
 router = APIRouter()
 
-@router.post("/", response_model=EvaluationResponseSchema, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=EvaluationResponseSchema, status_code=status.HTTP_201_CREATED, response_model_by_alias=False)
 async def create_new_evaluation(
     evaluation_data: EvaluationCreateSchema, # 请求体数据
     current_user: dict = Depends(get_current_user), # 认证依赖
@@ -21,7 +21,7 @@ async def create_new_evaluation(
     """
     发布一个新的评价，需要用户登录。
     """
-    user_id = current_user.get("user_id")
+    user_id = current_user.get("用户ID")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
@@ -44,7 +44,7 @@ async def create_new_evaluation(
         # 考虑在这里添加日志记录
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.get("/{evaluation_id}", response_model=EvaluationResponseSchema)
+@router.get("/{evaluation_id}", response_model=EvaluationResponseSchema, response_model_by_alias=False)
 async def get_evaluation_by_id_route(
     evaluation_id: UUID, # Path parameter
     conn: pyodbc.Connection = Depends(get_db_connection),
@@ -65,7 +65,7 @@ async def get_evaluation_by_id_route(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.get("/product/{product_id}", response_model=List[EvaluationResponseSchema])
+@router.get("/product/{product_id}", response_model=List[EvaluationResponseSchema], response_model_by_alias=False)
 async def get_evaluations_by_product_id_route(
     product_id: UUID, # Path parameter
     conn: pyodbc.Connection = Depends(get_db_connection),
@@ -86,7 +86,7 @@ async def get_evaluations_by_product_id_route(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.get("/buyer/{buyer_id}", response_model=List[EvaluationResponseSchema])
+@router.get("/buyer/{buyer_id}", response_model=List[EvaluationResponseSchema], response_model_by_alias=False)
 async def get_evaluations_by_buyer_id_route(
     buyer_id: UUID, # Path parameter
     conn: pyodbc.Connection = Depends(get_db_connection),

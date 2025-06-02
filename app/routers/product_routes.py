@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status 
 from ..services.product_service import ProductService
 from ..dal.product_dal import ProductDAL
 from ..schemas.product import ProductCreate, ProductUpdate
+from app.schemas.product_schemas import ProductResponseSchema
 from ..dependencies import get_current_authenticated_user, get_current_active_admin_user, get_product_service, get_db_connection
 import pyodbc
 from typing import List, Optional
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-@router.get("/favorites", status_code=fastapi_status.HTTP_200_OK)
+@router.get("/favorites", status_code=fastapi_status.HTTP_200_OK, response_model=List[dict], response_model_by_alias=False)
 async def get_user_favorites(
     user: dict = Depends(get_current_authenticated_user),
     product_service: ProductService = Depends(get_product_service),
@@ -37,7 +38,7 @@ async def get_user_favorites(
     Raises:
         HTTPException: 获取失败时返回相应的HTTP错误
     """
-    user_id = user['user_id'] # Changed to dictionary access
+    user_id = user['用户ID'] # Changed to dictionary access
     try:
         favorites = await product_service.get_user_favorites(conn, user_id)
         return favorites
@@ -51,12 +52,12 @@ async def get_user_favorites(
         # user_id might be None if the HTTPException is raised before it's assigned
         # or if user.get() returns None for both keys.
         # Check if user_id is assigned before logging.
-        log_user_id = user_id if user_id is not None else "N/A"
+        log_user_id = user['用户ID'] if user and '用户ID' in user else "N/A" # Use Chinese key
         logger.error(f"An unexpected error occurred while getting user favorites for user {log_user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.get("/", response_model=List[dict], summary="获取商品列表", tags=["Products"])
-@router.get("", response_model=List[dict], summary="获取商品列表 (无斜杠)", include_in_schema=False)
+@router.get("/", response_model=List[dict], summary="获取商品列表", tags=["Products"], response_model_by_alias=False)
+@router.get("", response_model=List[dict], summary="获取商品列表 (无斜杠)", include_in_schema=False, response_model_by_alias=False)
 async def get_product_list(category_name: str = None, status: str = None, keyword: str = None, min_price: float = None, max_price: float = None, order_by: str = 'PostTime', page_number: int = 1, page_size: int = 10,
                             product_service: ProductService = Depends(get_product_service),
                             conn: pyodbc.Connection = Depends(get_db_connection),
@@ -95,7 +96,7 @@ async def create_product(product: ProductCreate, user: dict = Depends(get_curren
     Raises:
         HTTPException: 创建失败时返回相应的HTTP错误
     """
-    return await product_service.create_product(conn, user['user_id'], product.category_name, product.product_name, 
+    return await product_service.create_product(conn, user['用户ID'], product.category_name, product.product_name, 
                                               product.description, product.quantity, product.price, product.condition, product.image_urls)
 
 @router.put("/{product_id}", status_code=fastapi_status.HTTP_204_NO_CONTENT)
@@ -125,8 +126,8 @@ async def update_product(
         logger.error(f"DAL error during product update {product_id}: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
     except Exception as e:
-        logger.error(f"Unexpected error updating product {product_id}: {e}")
-        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"更新商品时发生意外错误: {e}")
+        logger.error(f"An unexpected error occurred while deleting product {product_id} by user {current_user['用户ID']}: {e}", exc_info=True) # Use Chinese key
+        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
 @router.delete("/{product_id}", status_code=fastapi_status.HTTP_204_NO_CONTENT)
 async def delete_product(product_id: UUID, 
@@ -150,10 +151,10 @@ async def delete_product(product_id: UUID,
         # 将DALError具体化为500错误，因为SP的RAISERROR通常表示操作层面的问题，但这里DALError是通用包装
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
     except Exception as e:
-        logger.error(f"An unexpected error occurred while deleting product {product_id} by user {current_user['user_id']}: {e}", exc_info=True) # Changed to dictionary access
+        logger.error(f"An unexpected error occurred while deleting product {product_id} by user {current_user['用户ID']}: {e}", exc_info=True) # Use Chinese key
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.post("/batch/activate")
+@router.post("/batch/activate", response_model_by_alias=False)
 async def batch_activate_products(
     request_data: dict,
     admin: dict = Depends(get_current_active_admin_user), # Changed type hint to dict
@@ -175,7 +176,7 @@ async def batch_activate_products(
     Raises:
         HTTPException: 批量激活失败时返回相应的HTTP错误
     """
-    admin_id = admin["user_id"] # Already correct
+    admin_id = admin["用户ID"] # Use Chinese key
     try:
         product_ids_str = request_data.get("product_ids")
         if not product_ids_str or not isinstance(product_ids_str, list):
@@ -201,10 +202,10 @@ async def batch_activate_products(
         logger.error(f"Error during batch activation: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Unexpected error rejecting product by admin {admin['user_id'] if admin else 'N/A'}: {e}", exc_info=True) # Changed to dictionary access
+        logger.error(f"Unexpected error rejecting product by admin {admin['用户ID'] if admin else 'N/A'}: {e}", exc_info=True) # Use Chinese key
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.post("/batch/reject")
+@router.post("/batch/reject", response_model_by_alias=False)
 async def batch_reject_products(
     request_data: dict,
     admin: dict = Depends(get_current_active_admin_user), # Changed type hint to dict
@@ -226,7 +227,7 @@ async def batch_reject_products(
     Raises:
         HTTPException: 批量拒绝失败时返回相应的HTTP错误
     """
-    admin_id = admin["user_id"] # Already correct
+    admin_id = admin["用户ID"] # Use Chinese key
     try:
         product_ids_str = request_data.get("product_ids")
         reason = request_data.get("reason") # Extract reason from request_data
@@ -257,7 +258,7 @@ async def batch_reject_products(
         logger.error(f"An unexpected error occurred while batch rejecting products for admin {log_admin_id}: {e}", exc_info=True)
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.post("/{product_id}/favorite", status_code=fastapi_status.HTTP_201_CREATED)
+@router.post("/{product_id}/favorite", status_code=fastapi_status.HTTP_201_CREATED, response_model_by_alias=False)
 async def add_favorite(product_id: UUID, user: dict = Depends(get_current_authenticated_user), # Changed type hint to dict
                        product_service: ProductService = Depends(get_product_service),
                        conn: pyodbc.Connection = Depends(get_db_connection)):
@@ -276,7 +277,7 @@ async def add_favorite(product_id: UUID, user: dict = Depends(get_current_authen
     Raises:
         HTTPException: 收藏失败时返回相应的HTTP错误
     """
-    user_id = user['user_id'] # Changed to dictionary access
+    user_id = user['用户ID'] # Use Chinese key
     try:
         await product_service.add_favorite(conn, user_id, product_id) # 传入UUID类型
         return {"message": "商品收藏成功"}
@@ -294,7 +295,7 @@ async def add_favorite(product_id: UUID, user: dict = Depends(get_current_authen
         logger.error(f"An unexpected error occurred while adding favorite for user {log_user_id}, product {product_id}: {e}", exc_info=True)
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.delete("/{product_id}/favorite", status_code=fastapi_status.HTTP_200_OK)
+@router.delete("/{product_id}/favorite", status_code=fastapi_status.HTTP_200_OK, response_model_by_alias=False)
 async def remove_favorite(product_id: UUID, user: dict = Depends(get_current_authenticated_user), # Changed type hint to dict
                           product_service: ProductService = Depends(get_product_service),
                           conn: pyodbc.Connection = Depends(get_db_connection)):
@@ -313,7 +314,7 @@ async def remove_favorite(product_id: UUID, user: dict = Depends(get_current_aut
     Raises:
         HTTPException: 移除失败时返回相应的HTTP错误
     """
-    user_id = user['user_id'] # Changed to dictionary access
+    user_id = user['用户ID'] # Use Chinese key
     try:
         await product_service.remove_favorite(conn, user_id, product_id) # 传入UUID类型
         return {"message": "商品已成功从收藏列表中移除"}
@@ -328,7 +329,7 @@ async def remove_favorite(product_id: UUID, user: dict = Depends(get_current_aut
         logger.error(f"An unexpected error occurred while removing favorite for user {log_user_id}, product {product_id}: {e}", exc_info=True)
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.get("/{product_id}")
+@router.get("/{product_id}", response_model=ProductResponseSchema, response_model_by_alias=False)
 async def get_product_detail(product_id: UUID,
                               product_service: ProductService = Depends(get_product_service),
                               conn: pyodbc.Connection = Depends(get_db_connection)):
@@ -361,7 +362,7 @@ async def get_product_detail(product_id: UUID,
         logger.error(f"An unexpected error occurred while getting product detail for ID {product_id}: {e}", exc_info=True)
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.put("/{product_id}/status/activate")
+@router.put("/{product_id}/status/activate", response_model_by_alias=False)
 async def activate_product(product_id: UUID, admin: dict = Depends(get_current_active_admin_user), # Changed type hint to dict
                             product_service: ProductService = Depends(get_product_service),
                             conn: pyodbc.Connection = Depends(get_db_connection)):
@@ -380,7 +381,7 @@ async def activate_product(product_id: UUID, admin: dict = Depends(get_current_a
     Raises:
         HTTPException: 激活失败时返回相应的HTTP错误
     """
-    admin_id = admin["user_id"] # Already correct
+    admin_id = admin["用户ID"] # Use Chinese key
     try:
         await product_service.activate_product(conn, product_id, admin_id) # 传入UUID类型
         return {"message": "商品已成功激活"}
@@ -398,7 +399,7 @@ async def activate_product(product_id: UUID, admin: dict = Depends(get_current_a
         logger.error(f"An unexpected error occurred while activating product for admin {log_admin_id}: {e}", exc_info=True)
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.put("/{product_id}/status/reject")
+@router.put("/{product_id}/status/reject", response_model_by_alias=False)
 async def reject_product(product_id: UUID, request_data: dict,
                             admin: dict = Depends(get_current_active_admin_user), # Changed type hint to dict
                             product_service: ProductService = Depends(get_product_service),
@@ -419,7 +420,7 @@ async def reject_product(product_id: UUID, request_data: dict,
     Raises:
         HTTPException: 拒绝失败时返回相应的HTTP错误
     """
-    admin_id = admin["user_id"] # Already correct
+    admin_id = admin["用户ID"] # Use Chinese key
     try:
         reason = request_data.get("reason")
         if reason is None:
@@ -462,5 +463,5 @@ async def withdraw_product(product_id: UUID,
         logger.error(f"DAL Error withdrawing product {product_id}: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
     except Exception as e:
-        logger.error(f"An unexpected error occurred while withdrawing product {product_id} by user {current_user['user_id']}: {e}", exc_info=True) # Changed to dictionary access
+        logger.error(f"An unexpected error occurred while withdrawing product {product_id} by user {current_user['用户ID']}: {e}", exc_info=True) # Use Chinese key
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")

@@ -64,15 +64,15 @@ BEGIN
     WHERE UserName = @trimmedUsername;
 
     SELECT
-        UserID,
-        UserName,
-        Password,
-        Status,
-        IsStaff,
-        IsSuperAdmin,
-        IsVerified,
-        Email,
-        LastLoginTime
+        UserID AS 用户ID,
+        UserName AS 用户名,
+        Password AS 密码哈希,
+        Status AS 账户状态,
+        IsStaff AS 是否管理员,
+        IsSuperAdmin AS 是否超级管理员,
+        IsVerified AS 是否已认证,
+        Email AS 邮箱,
+        LastLoginTime AS 最后登录时间
     FROM [User]
     WHERE UserName = @trimmedUsername OR Email = @trimmedUsername;
 END;
@@ -137,7 +137,7 @@ BEGIN
         COMMIT TRANSACTION;
 
         -- 返回新用户的 UserID
-        SELECT @newUserId AS NewUserID, '用户创建成功并查询成功' AS Message; -- 返回新用户ID和成功消息
+        SELECT @newUserId AS 新用户ID, '用户创建成功并查询成功' AS 消息; -- 返回新用户ID和成功消息
 
     END TRY
     BEGIN CATCH
@@ -147,7 +147,7 @@ BEGIN
         -- 重新抛出错误
         THROW;
 
-        SELECT ERROR_MESSAGE() AS ErrorMsg;
+        SELECT ERROR_MESSAGE() AS 错误消息;
     END CATCH
 END;
 GO
@@ -249,7 +249,7 @@ BEGIN
     END CATCH
 
     -- 增加一个额外的SELECT语句以满足复杂度要求
-    SELECT '用户信息更新完成并查询成功' AS Result;
+    SELECT '用户信息更新完成并查询成功' AS 结果;
 END;
 GO
 
@@ -270,7 +270,7 @@ BEGIN
     END
 
     -- SQL语句涉及1个表，包含控制流(IF)
-    SELECT Password FROM [User] WHERE UserID = @userId;
+    SELECT Password AS 密码哈希 FROM [User] WHERE UserID = @userId;
 END;
 GO
 
@@ -311,7 +311,7 @@ BEGIN
         COMMIT TRANSACTION; -- 提交事务
 
         -- 返回成功消息 (SQL语句2: SELECT)
-        SELECT '密码更新成功' AS Result;
+        SELECT '密码更新成功' AS 结果;
 
     END TRY
     BEGIN CATCH
@@ -406,7 +406,7 @@ BEGIN
         COMMIT TRANSACTION; -- 提交事务
 
         -- 返回成功消息 (SQL语句3)
-        SELECT '通知标记为已读成功。' AS Result;
+        SELECT '通知标记为已读成功。' AS 结果;
 
     END TRY
     BEGIN CATCH
@@ -449,11 +449,11 @@ BEGIN
         SET @OperationResultCode = -90; -- 表示在检查用户时发生错误
         -- 直接输出结果并返回，不再继续执行删除
         SELECT 
-            @InputUserID_Str AS Debug_InputUserID,
-            @UserCount AS Debug_UserCount,
-            @FoundUsername AS Debug_FoundUsername,
-            @DebugMessage AS Debug_Message,
-            @OperationResultCode AS OperationResultCode;
+            @InputUserID_Str AS 调试_输入的用户ID,
+            @UserCount AS 调试_用户计数,
+            @FoundUsername AS 调试_找到的用户名,
+            @DebugMessage AS 调试_消息,
+            @OperationResultCode AS 操作结果代码;
         RETURN;
     END CATCH
 
@@ -552,11 +552,11 @@ BEGIN
 
     -- 最终返回单一结果集
     SELECT 
-        @InputUserID_Str AS Debug_InputUserID,
-        @UserCount AS Debug_UserCount,
-        @FoundUsername AS Debug_FoundUsername,
-        @DebugMessage AS Debug_Message,
-        @OperationResultCode AS OperationResultCode; -- 最终的操作结果代码
+        @InputUserID_Str AS 调试_输入的用户ID,
+        @UserCount AS 调试_用户计数,
+        @FoundUsername AS 调试_找到的用户名,
+        @DebugMessage AS 调试_消息,
+        @OperationResultCode AS 操作结果代码; -- 最终的操作结果代码
 
     -- 不再需要单独的 SELECT @ResultCode AS ResultCode;
 
@@ -616,7 +616,7 @@ BEGIN
         COMMIT TRANSACTION;
 
         -- 4. 返回用户ID和TokenID (如果需要)
-        SELECT @userId AS UserID, (SELECT TokenID FROM [PasswordResetTokens] WHERE Token = @token) AS TokenID; -- 返回用户ID和新的TokenID
+        SELECT @userId AS 用户ID, (SELECT TokenID FROM [PasswordResetTokens] WHERE Token = @token) AS 令牌ID; -- 返回用户ID和新的TokenID
 
     END TRY
     BEGIN CATCH
@@ -637,11 +637,11 @@ BEGIN
 
     -- 查找 Token 详情并验证其有效性
     SELECT
-        TokenID,
-        UserID,
-        CreatedAt,
-        ExpiresAt,
-        Used
+        TokenID AS 令牌ID,
+        UserID AS 用户ID,
+        CreatedAt AS 创建时间,
+        ExpiresAt AS 过期时间,
+        Used AS 是否已使用
     FROM [PasswordResetTokens]
     WHERE Token = @token
       AND Used = 0
@@ -695,7 +695,7 @@ BEGIN
         COMMIT TRANSACTION;
 
         -- 3. 返回成功指示 (例如，更新的用户ID)
-        SELECT @userId AS UpdatedUserID, '密码重置成功。' AS Message;
+        SELECT @userId AS 已更新用户ID, '密码重置成功。' AS 消息;
 
     END TRY
     BEGIN CATCH
@@ -728,15 +728,15 @@ BEGIN
 
     -- SQL语句涉及1个表，包含控制流(IF)和多个SELECT列
     SELECT
-        UserID,
-        UserName,
-        Password,
-        Status,
-        IsStaff,
-        IsSuperAdmin,
-        IsVerified,
-        Email,
-        LastLoginTime
+        UserID AS 用户ID,
+        UserName AS 用户名,
+        Password AS 密码哈希,
+        Status AS 账户状态,
+        IsStaff AS 是否管理员,
+        IsSuperAdmin AS 是否超级管理员,
+        IsVerified AS 是否已认证,
+        Email AS 邮箱,
+        LastLoginTime AS 最后登录时间
     FROM [User]
     WHERE Email = @email;
 END;
@@ -760,7 +760,7 @@ BEGIN
         IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @userId)
         BEGIN
             IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-            SELECT -1 AS OperationResultCode, '用户不存在。' AS Debug_Message;
+            SELECT -1 AS 操作结果代码, '用户不存在。' AS 消息;
             RETURN;
         END
 
@@ -774,11 +774,11 @@ BEGIN
         VALUES (NEWID(), @userId, @otpCode, GETDATE(), @expiresAt, 0, @otpType); -- 传入 OtpType 值
 
         COMMIT TRANSACTION;
-        SELECT 0 AS OperationResultCode, 'OTP创建成功。';
+        SELECT 0 AS 操作结果代码, 'OTP创建成功。' AS 消息;
     END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-        SELECT -99 AS OperationResultCode, ERROR_MESSAGE() AS Debug_Message;
+        SELECT -99 AS 操作结果代码, ERROR_MESSAGE() AS 消息;
     END CATCH
 END;
 GO
@@ -795,13 +795,13 @@ BEGIN
     DECLARE @currentUtc DATETIME = GETUTCDATE();
     
     SELECT TOP 1
-        o.OtpID AS OtpID,
-        o.UserID AS UserID,
-        o.OtpCode AS OtpCode,
-        o.CreationTime AS CreationTime,
-        o.ExpiresAt AS ExpiresAt,
-        o.IsUsed AS IsUsed,
-        u.Email AS Email
+        o.OtpID AS 一次性密码ID,
+        o.UserID AS 用户ID,
+        o.OtpCode AS 一次性密码代码,
+        o.CreationTime AS 创建时间,
+        o.ExpiresAt AS 过期时间,
+        o.IsUsed AS 是否已使用,
+        u.Email AS 邮箱
     FROM [Otp] o
     JOIN [User] u ON o.UserID = u.UserID
     WHERE u.Email = @email
@@ -814,7 +814,7 @@ BEGIN
     IF @@ROWCOUNT = 0
     BEGIN
         -- 为了前端逻辑更清晰，这里返回一个特定的OperationResultCode来指示无效或过期
-        SELECT -1 AS OperationResultCode, '验证码无效或已过期。' AS Debug_Message;
+        SELECT -1 AS 操作结果代码, '验证码无效或已过期。' AS 消息;
     END
 END;
 GO
@@ -834,7 +834,7 @@ BEGIN
         IF NOT EXISTS (SELECT 1 FROM [Otp] WHERE OtpID = @otpId AND IsUsed = 0)
         BEGIN
             IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-            SELECT -1 AS OperationResultCode, 'OTP不存在或已被使用。';
+            SELECT -1 AS 操作结果代码, 'OTP不存在或已被使用。' AS 消息;
             RETURN;
         END
 
@@ -843,11 +843,11 @@ BEGIN
         WHERE OtpID = @otpId;
 
         COMMIT TRANSACTION;
-        SELECT 0 AS OperationResultCode, 'OTP已成功标记为已使用。';
+        SELECT 0 AS 操作结果代码, 'OTP已成功标记为已使用。' AS 消息;
     END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-        SELECT -99 AS OperationResultCode, ERROR_MESSAGE() AS Debug_Message;
+        SELECT -99 AS 操作结果代码, ERROR_MESSAGE() AS 消息;
     END CATCH
 END;
 GO
@@ -934,6 +934,6 @@ BEGIN
     END CATCH
 
     -- 增加一个额外的SELECT语句以满足复杂度要求
-    SELECT '用户状态更新完成并查询成功' AS Result;
+    SELECT '用户状态更新完成并查询成功' AS 结果;
 END;
 GO

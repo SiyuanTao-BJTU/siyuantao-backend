@@ -101,16 +101,16 @@ class UserService:
         if not user_data:
             raise AuthenticationError("用户名/邮箱或密码不正确")
 
-        if not verify_password(password, user_data['password']):
+        if not verify_password(password, user_data['密码哈希']):
             raise AuthenticationError("用户名/邮箱或密码不正确")
 
-        user_id = UUID(str(user_data['userid']))
-        is_staff = user_data.get("isstaff", False)
-        is_verified = user_data.get("isverified", False)
+        user_id = UUID(str(user_data['用户ID']))
+        is_staff = user_data.get("是否管理员", False)
+        is_verified = user_data.get("是否已认证", False)
         
-        logger.debug(f"Checking status for user: {user_data['username']} (Status: {user_data['status']})")
-        if user_data['status'] != "Active":
-            raise AuthenticationError(f"用户 {user_data['username']} 账户已被禁用或不活跃。")
+        logger.debug(f"Checking status for user: {user_data['用户名']} (Status: {user_data['账户状态']})")
+        if user_data['账户状态'] != "Active":
+            raise AuthenticationError(f"用户 {user_data['用户名']} 账户已被禁用或不活跃。")
 
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
@@ -121,10 +121,10 @@ class UserService:
             "is_staff": is_staff,
             "is_verified": is_verified
         }
-        logger.debug(f"Creating JWT token for user: {user_data['username']}")
+        logger.debug(f"Creating JWT token for user: {user_data['用户名']}")
         access_token = create_access_token(payload, expires_delta=access_token_expires)
 
-        logger.info(f"Authentication successful, token created for user: {user_data['username']}")
+        logger.info(f"Authentication successful, token created for user: {user_data['用户名']}")
         return access_token
 
     async def get_user_profile_by_id(self, conn: pyodbc.Connection, user_id: UUID) -> UserResponseSchema:
@@ -318,7 +318,7 @@ class UserService:
             # 1. 查找用户或为新用户创建 OTP
             # 使用 DAL 的 request_verification_link 方法获取用户ID
             user_info = await self.user_dal.request_verification_link(conn, user_id, email) # This DAL method now returns UserID
-            target_user_id = user_info.get('UserID')
+            target_user_id = user_info.get('用户ID')
 
             if not target_user_id:
                 # If user not found, and it's not a new user scenario (which DAL would handle implicitly)
@@ -377,8 +377,8 @@ class UserService:
                 logger.warning(f"OTP verification failed: Invalid, expired, or used OTP for email {email}.")
                 raise AuthenticationError("验证码无效或已过期，请重新获取。")
             
-            user_id = otp_details.get('UserID')
-            otp_id = otp_details.get('OtpID')
+            user_id = otp_details.get('用户ID')
+            otp_id = otp_details.get('验证OTP流水号')
 
             if not user_id or not otp_id:
                 logger.error(f"DAL error: UserID or OtpID missing from OTP details for email {email}.")
@@ -547,7 +547,7 @@ class UserService:
         # Manually construct dict for UserResponseSchema, ensuring all fields are present
         # and types are correct.
         converted_data = {
-            "user_id": UUID(dal_user_data["用户id"]) if dal_user_data.get("用户id") else None, # 确保获取小写的 '用户id' 键，并进行 UUID 转换
+            "user_id": UUID(dal_user_data["用户ID"]) if dal_user_data.get("用户ID") else None,
             "username": dal_user_data.get("用户名"),
             "email": dal_user_data.get("邮箱"),
             "status": dal_user_data.get("账户状态"),
@@ -556,7 +556,7 @@ class UserService:
             "is_super_admin": dal_user_data.get("是否超级管理员", False),
             "is_verified": dal_user_data.get("是否已认证", False),
             "major": dal_user_data.get("专业"),
-            "avatar_url": dal_user_data.get("头像url"), # 将 '头像URL' 改为 '头像url'
+            "avatar_url": dal_user_data.get("头像URL"),
             "bio": dal_user_data.get("个人简介"),
             "phone_number": dal_user_data.get("手机号码"),
             "join_time": dal_user_data.get("注册时间"),
@@ -593,12 +593,12 @@ class UserService:
         # 1. Find user by email
         user = await self.user_dal.get_user_by_email_with_password(conn, email)
 
-        if not user or not user.get('UserID'):
+        if not user or not user.get('用户ID'):
             # User not found by email. For security, don't reveal if email exists or not.
             logger.warning(f"Password reset request for non-existent email: {email}")
             return {"message": "如果邮箱存在，您将很快收到一封包含密码重置链接的邮件。"}
             
-        user_id = user['UserID']
+        user_id = user['用户ID']
 
         # 2. Generate a unique OTP (e.g., 6-digit number)
         otp_code = str(random.randint(100000, 999999)) # Generate a 6-digit OTP
@@ -662,8 +662,8 @@ class UserService:
             logger.warning(f"OTP verification failed: Invalid, expired, or used OTP for email {email}.")
             raise AuthenticationError("验证码无效或已过期，请重新获取。")
         
-        user_id = otp_details.get('UserID')
-        otp_id = otp_details.get('OtpID')
+        user_id = otp_details.get('用户ID')
+        otp_id = otp_details.get('验证OTP流水号')
 
         if not user_id or not otp_id:
             logger.error(f"DAL error: UserID or OtpID missing from OTP details for email {email}.")
@@ -716,13 +716,13 @@ class UserService:
         else:
             user = await self.user_dal.get_user_by_username_with_password(conn, identifier) # Reuse existing DAL method
 
-        if not user or not user.get('UserID'):
+        if not user or not user.get('用户ID'):
             logger.warning(f"Login OTP request for non-existent identifier: {identifier}")
             # For security, return a generic success message even if user not found
             return {"message": "如果账户存在，您将很快收到一封包含登录验证码的邮件。"}
 
-        user_id = user['UserID']
-        email = user.get('Email') # Assuming DAL returns Email field
+        user_id = user['用户ID']
+        email = user.get('邮箱') # Assuming DAL returns Email field
 
         if not email:
             logger.warning(f"User {user_id} does not have an associated email for OTP login.")
@@ -787,7 +787,7 @@ class UserService:
         else: # Assume username
             user = await self.user_dal.get_user_by_username_with_password(conn, identifier)
             if not user: raise NotFoundError(f"User with username {identifier} not found.")
-            email = user.get('Email')
+            email = user.get('邮箱')
             if not email: raise ValueError("账户未绑定邮箱，无法使用OTP登录。请使用密码登录。")
 
         otp_details = await self.user_dal.get_otp_details(conn, email, otp_code)
@@ -797,8 +797,8 @@ class UserService:
             logger.warning(f"Login OTP verification failed: Invalid, expired, or used OTP for identifier {identifier}.")
             raise AuthenticationError("验证码无效或已过期，请重新获取。")
         
-        user_id = otp_details.get('UserID')
-        otp_id = otp_details.get('OtpID')
+        user_id = otp_details.get('用户ID')
+        otp_id = otp_details.get('验证OTP流水号')
 
         if not user_id or not otp_id:
             logger.error(f"DAL error: UserID or OtpID missing from login OTP details for identifier {identifier}.")
@@ -806,7 +806,7 @@ class UserService:
 
         # 2. Check user account status
         # Reuse existing user object fetched by get_user_by_email_with_password or get_user_by_username_with_password
-        if user.get('Status') == 'Disabled':
+        if user.get('账户状态') == 'Disabled':
             logger.warning(f"Authentication failed: Account for user {identifier} is disabled.")
             raise ForbiddenError("账户已被禁用")
 
@@ -821,9 +821,9 @@ class UserService:
         # 4. Generate JWT Token
         logger.debug(f"Creating JWT token for user: {identifier}")
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        is_staff = user.get('IsStaff', False)
-        is_verified = user.get('IsVerified', False)
-        is_super_admin = user.get('IsSuperAdmin', False)
+        is_staff = user.get('是否管理员', False)
+        is_verified = user.get('是否已认证', False)
+        is_super_admin = user.get('是否超级管理员', False)
 
         access_token = create_access_token(
             data={

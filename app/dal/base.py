@@ -61,11 +61,11 @@ async def execute_query(
             return None
 
         if fetchone:
-            columns = [column[0].lower() for column in cursor.description]
+            columns = [column[0] for column in cursor.description]
             row = await loop.run_in_executor(None, cursor.fetchone)
             return dict(zip(columns, row)) if row else None
         elif fetchall:
-            columns = [column[0].lower() for column in cursor.description]
+            columns = [column[0] for column in cursor.description]
             rows = await loop.run_in_executor(None, cursor.fetchall)
             return [dict(zip(columns, row)) for row in rows] if rows else []
         else:

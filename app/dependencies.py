@@ -132,11 +132,9 @@ async def get_current_authenticated_user(
             detail="Invalid authentication credentials (user ID missing in token payload)",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    # user_id_str is already a UUID object, no need to convert again
-    user_id = user_id_str # Directly assign the UUID object
+    user_id = user_id_str
 
     try:
-        # Fetch full user profile from DB
         user_profile = await user_service.get_user_profile_by_id(conn, user_id)
         if not user_profile:
             raise HTTPException(
@@ -145,18 +143,16 @@ async def get_current_authenticated_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # Convert UserResponseSchema object to a dictionary for consistent access
-        # Assuming user_profile is a Pydantic model (UserResponseSchema)
-        user_dict = user_profile.model_dump() # Use .model_dump() for Pydantic v2
+        user_dict = user_profile.model_dump()
 
-        if user_dict.get("status") != "Active": # Check status from dictionary
+        if user_dict.get("账户状态") != "Active":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User account is inactive",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        return user_dict # Return the dictionary
+        return user_dict
 
     except (NotFoundError, DALError, PermissionError) as e:
         # Handle specific service errors

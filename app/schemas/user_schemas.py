@@ -39,23 +39,24 @@ class UserPasswordUpdate(BaseModel):
 # Properties to return via API
 # Renamed from UserResponse to UserResponseSchema as per plan
 class UserResponseSchema(BaseModel):
-    user_id: UUID = Field(..., description="用户唯一ID")
-    username: str = Field(..., description="用户名")
-    email: Optional[str] = Field(None, description="邮箱") # 邮箱改为可选，并允许 None
-    status: str = Field(..., description="账户状态")
-    credit: int = Field(..., description="信用分")
-    is_staff: bool = Field(..., description="是否管理员")
-    is_super_admin: bool = Field(..., description="是否超级管理员")
-    is_verified: bool = Field(..., description="是否已认证")
-    major: Optional[str] = Field(None, description="专业")
-    avatar_url: Optional[str] = Field(None, description="头像URL")
-    bio: Optional[str] = Field(None, description="个人简介")
-    phone_number: Optional[str] = Field(None, description="手机号码") # 手机号改为可选
-    join_time: datetime = Field(..., description="注册时间 (ISO 8601格式)") # Use datetime object
-    last_login_time: Optional[datetime] = Field(None, description="最后登录时间") # Added for admin view
+    用户ID: UUID = Field(..., alias="user_id", description="用户唯一ID")
+    用户名: str = Field(..., alias="username", description="用户名")
+    邮箱: Optional[str] = Field(None, alias="email", description="邮箱")
+    账户状态: str = Field(..., alias="status", description="账户状态")
+    信用分: int = Field(..., alias="credit", description="信用分")
+    是否管理员: bool = Field(..., alias="is_staff", description="是否管理员")
+    是否超级管理员: bool = Field(..., alias="is_super_admin", description="是否超级管理员")
+    是否已认证: bool = Field(..., alias="is_verified", description="是否已认证")
+    专业: Optional[str] = Field(None, alias="major", description="专业")
+    头像URL: Optional[str] = Field(None, alias="avatar_url", description="头像URL")
+    个人简介: Optional[str] = Field(None, alias="bio", description="个人简介")
+    手机号码: Optional[str] = Field(None, alias="phone_number", description="手机号码")
+    注册时间: datetime = Field(..., alias="join_time", description="注册时间 (ISO 8601格式)")
+    最后登录时间: Optional[datetime] = Field(None, alias="last_login_time", description="最后登录时间")
 
     class Config:
         from_attributes = True # Pydantic v2: 允许通过 ORM 属性名访问
+        populate_by_name = True # Pydantic v2: 允许通过别名填充模型
         # orm_mode = True # Pydantic v1 equivalent
 
 # Schema for JWT Token response

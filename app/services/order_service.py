@@ -183,8 +183,8 @@ class OrderService:
                 raise NotFoundError(f"Order with ID {order_id} not found.")
             
             # Authorization check: only seller, buyer, or admin can view the order
-            if order.get('BuyerID') != requesting_user_id and \
-               order.get('SellerID') != requesting_user_id and \
+            if order.get('买家ID') != requesting_user_id and \
+               order.get('卖家ID') != requesting_user_id and \
                not (await self.order_dal.is_admin(conn, requesting_user_id)): # Assuming an admin check in DAL
                 raise ForbiddenError("You are not authorized to view this order.")
 
@@ -220,9 +220,9 @@ class OrderService:
             if not order_to_update:
                 raise NotFoundError(f"Order with ID {order_id} not found.")
 
-            current_status = order_to_update.get('Status')
-            buyer_id = order_to_update.get('BuyerID')
-            seller_id = order_to_update.get('SellerID')
+            current_status = order_to_update.get('订单状态')
+            buyer_id = order_to_update.get('买家ID')
+            seller_id = order_to_update.get('卖家ID')
 
             # Authorization: Only buyer, seller, or admin can update status
             is_admin = await self.order_dal.is_admin(conn, user_id)

@@ -16,27 +16,27 @@ BEGIN
     BEGIN
         -- 可以选择不RAISERROR，而是返回空结果集，让服务层处理商品未找到的逻辑
         -- RAISERROR('商品不存在。', 16, 1);
-        SELECT NULL AS ProductID WHERE 1 = 0; -- 返回空结果集
+        SELECT NULL AS 商品ID WHERE 1 = 0; -- 返回空结果集
         RETURN;
     END
 
     -- 获取商品详情 (SQL语句2)
     SELECT
-        P.ProductID AS product_id,
-        P.ProductName AS product_name,
-        P.Description AS description,
-        P.Quantity AS quantity,
-        P.Price AS price,
-        P.PostTime AS post_time,
-        P.Status AS status,
-        P.OwnerID AS owner_id,
-        C.CategoryName AS category_name,
-        (SELECT TOP 1 ImageURL FROM [ProductImage] WHERE ProductID = P.ProductID ORDER BY SortOrder) AS main_image_url,
-        STUFF((SELECT ',' + ImageURL FROM [ProductImage] WHERE ProductID = P.ProductID ORDER BY SortOrder FOR XML PATH('')), 1, 1, '') AS image_urls,
-        U.UserName AS owner_username,
-        P.Condition AS condition
+        P.ProductID AS 商品ID,
+        P.ProductName AS 商品名称,
+        P.Description AS 描述,
+        P.Quantity AS 数量,
+        P.Price AS 价格,
+        P.PostTime AS 发布时间,
+        P.Status AS 商品状态,
+        P.OwnerID AS 卖家ID,
+        P.CategoryName AS 分类名称, -- 修改 CategoryID to CategoryName based on table structure
+        (SELECT TOP 1 ImageURL FROM [ProductImage] WHERE ProductID = P.ProductID ORDER BY SortOrder) AS 主图URL,
+        STUFF((SELECT ',' + ImageURL FROM [ProductImage] WHERE ProductID = P.ProductID ORDER BY SortOrder FOR XML PATH('')), 1, 1, '') AS 图片URL列表,
+        U.UserName AS 卖家用户名,
+        P.Condition AS 成色
     FROM [Product] P
-    JOIN [Category] C ON P.CategoryID = C.CategoryID
+    -- JOIN [Category] C ON P.CategoryID = C.CategoryID -- Removed join with Category as CategoryName is directly in Product
     JOIN [User] U ON P.OwnerID = U.UserID
     WHERE P.ProductID = @ProductID;
 
@@ -67,17 +67,17 @@ BEGIN
 
     SET @sql = N'
     SELECT
-        p.ProductID AS product_id,
-        p.ProductName AS product_name,
-        p.Description AS description,
-        p.Quantity AS quantity,
-        p.Price AS price,
-        p.PostTime AS post_time,
-        p.Status AS status,
-        u.UserName AS owner_username,
-        p.CategoryName AS category_name,
-        pi.ImageURL AS main_image_url,
-        COUNT(p.ProductID) OVER() AS total_products
+        p.ProductID AS 商品ID,
+        p.ProductName AS 商品名称,
+        p.Description AS 描述,
+        p.Quantity AS 数量,
+        p.Price AS 价格,
+        p.PostTime AS 发布时间,
+        p.Status AS 商品状态,
+        u.UserName AS 卖家用户名,
+        p.CategoryName AS 分类名称,
+        pi.ImageURL AS 主图URL,
+        COUNT(p.ProductID) OVER() AS 总商品数
     FROM [Product] p
     JOIN [User] u ON p.OwnerID = u.UserID
     LEFT JOIN [ProductImage] pi ON p.ProductID = pi.ProductID AND pi.SortOrder = 0
@@ -238,15 +238,15 @@ BEGIN
         -- 返回更新后的商品基本信息 (SQL语句3, 面向UI)
         -- 这里复用sp_GetProductDetail的一部分逻辑或调用它
         SELECT
-            p.ProductID AS product_id,
-            p.ProductName AS product_name,
-            p.Description AS description,
-            p.Quantity AS quantity,
-            p.Price AS price,
-            p.PostTime AS post_time,
-            p.Status AS status,
-            u.UserName AS owner_username,
-            p.CategoryName AS category_name
+            p.ProductID AS 商品ID,
+            p.ProductName AS 商品名称,
+            p.Description AS 描述,
+            p.Quantity AS 数量,
+            p.Price AS 价格,
+            p.PostTime AS 发布时间,
+            p.Status AS 商品状态,
+            u.UserName AS 卖家用户名,
+            p.CategoryName AS 分类名称
         FROM [Product] p
         JOIN [User] u ON p.OwnerID = u.UserID
         WHERE p.ProductID = @productId;
@@ -325,7 +325,7 @@ BEGIN
         COMMIT TRANSACTION; -- 提交事务
 
         -- 返回删除结果 (SQL语句3, 面向UI)
-        SELECT '商品删除成功' AS Result;
+        SELECT '商品删除成功' AS 结果;
 
     END TRY
     BEGIN CATCH
@@ -401,7 +401,8 @@ BEGIN
 
         -- 更新 [Product] 表的状态 (SQL语句3)
         UPDATE [Product]
-        SET Status = @newStatus
+        SET Status = @newStatus,
+            AuditReason = CASE WHEN @newStatus = 'Rejected' THEN @reason ELSE AuditReason END -- 只有拒绝时才更新 AuditReason
         WHERE ProductID = @productId;
 
         -- 插入系统通知 (SQL语句4)
@@ -427,7 +428,7 @@ BEGIN
         COMMIT TRANSACTION;
 
         -- 返回审核成功的消息 (SQL语句5 - 调整语句序号)
-        SELECT '商品审核完成。' AS Result;
+        SELECT '商品审核完成。' AS 结果;
 
     END TRY
     BEGIN CATCH
@@ -491,7 +492,7 @@ BEGIN
         COMMIT TRANSACTION;
 
         -- 返回成功消息 (SQL语句3)
-        SELECT '商品下架成功。' AS Result;
+        SELECT '商品下架成功。' AS 结果;
 
     END TRY
     BEGIN CATCH
@@ -552,7 +553,7 @@ BEGIN
         COMMIT TRANSACTION; -- 提交事务
 
         -- 返回收藏成功的消息 (SQL语句5)
-        SELECT '商品收藏成功。' AS Result;
+        SELECT '商品收藏成功。' AS 结果;
 
     END TRY
     BEGIN CATCH
@@ -621,7 +622,7 @@ BEGIN
         COMMIT TRANSACTION; -- 提交事务
 
         -- 返回成功消息 (SQL语句4)
-        SELECT '商品收藏移除成功。' AS Result;
+        SELECT '商品收藏移除成功。' AS 结果;
 
     END TRY
     BEGIN CATCH
@@ -652,18 +653,18 @@ BEGIN
 
     -- 获取用户收藏的商品列表 (SQL语句2, 涉及 UserFavorite, Product 2个表，可以通过JOIN User表达到3个表)
     SELECT
-        p.ProductID AS product_id,
-        p.ProductName AS product_name,
-        p.Description AS description,
-        p.Quantity AS quantity,
-        p.Price AS price,
-        p.PostTime AS post_time,
-        p.Status AS status,
-        u_owner.UserName AS owner_username,
-        p.CategoryName AS category_name,
-        uf.FavoriteTime AS favorite_time,
+        p.ProductID AS 商品ID,
+        p.ProductName AS 商品名称,
+        p.Description AS 描述,
+        p.Quantity AS 数量,
+        p.Price AS 价格,
+        p.PostTime AS 发布时间,
+        p.Status AS 商品状态,
+        u_owner.UserName AS 卖家用户名,
+        p.CategoryName AS 分类名称,
+        uf.FavoriteTime AS 收藏时间,
         -- 获取主图URL (SQL语句3, 涉及 ProductImage)
-        (SELECT TOP 1 ImageURL FROM [ProductImage] pi WHERE pi.ProductID = p.ProductID AND pi.SortOrder = 0 ORDER BY UploadTime ASC) AS main_image_url
+        (SELECT TOP 1 ImageURL FROM [ProductImage] pi WHERE pi.ProductID = p.ProductID AND pi.SortOrder = 0 ORDER BY UploadTime ASC) AS 主图URL
     FROM [UserFavorite] uf
     JOIN [Product] p ON uf.ProductID = p.ProductID -- JOIN Product
     JOIN [User] u_owner ON p.OwnerID = u_owner.UserID -- JOIN User (达到3个表要求)
@@ -787,7 +788,7 @@ BEGIN
     SET NOCOUNT ON;
     DELETE FROM [ProductImage]
     WHERE ProductID = @productId;
-    SELECT @@ROWCOUNT AS DeletedImageCount; -- 可以选择返回删除了多少张图片
+    SELECT @@ROWCOUNT AS 已删除图片数量; -- 可以选择返回删除了多少张图片
 END;
 GO
 
@@ -813,8 +814,8 @@ BEGIN
         BEGIN TRANSACTION;
 
         -- 插入商品信息
-        INSERT INTO [Product] (ProductID, OwnerID, ProductName, Description, Quantity, Price, PostTime, Status, CategoryName, Condition) -- 添加 Condition 列
-        VALUES (@productId, @ownerId, @productName, @description, @quantity, @price, GETDATE(), 'PendingReview', @categoryName, @condition); -- 默认状态为 PendingReview
+        INSERT INTO [Product] (ProductID, OwnerID, ProductName, Description, Quantity, Price, PostTime, Status, CategoryName, Condition, AuditReason) -- 添加 Condition 列, AuditReason
+        VALUES (@productId, @ownerId, @productName, @description, @quantity, @price, GETDATE(), 'PendingReview', @categoryName, @condition, NULL); -- 默认状态为 PendingReview, AuditReason is NULL
 
         -- 处理图片URL
         IF @imageUrls IS NOT NULL AND LTRIM(RTRIM(@imageUrls)) <> ''
@@ -844,7 +845,7 @@ BEGIN
 
         COMMIT TRANSACTION;
 
-        SELECT @productId AS NewProductId; -- 返回新生成的商品ID
+        SELECT @productId AS 新商品ID; -- 返回新生成的商品ID
 
     END TRY
     BEGIN CATCH
@@ -885,7 +886,8 @@ BEGIN
         BEGIN TRANSACTION;
 
         UPDATE [Product]
-        SET Status = 'Active'
+        SET Status = 'Active',
+            AuditReason = NULL -- 激活时清除拒绝原因
         WHERE ProductID = @productId;
 
         -- 记录审核操作（可选，但推荐用于审计）
@@ -969,7 +971,8 @@ BEGIN
 
         -- 使用 STRING_SPLIT 来解析逗号分隔的ProductID字符串
         UPDATE P
-        SET P.Status = 'Active'
+        SET P.Status = 'Active',
+            P.AuditReason = NULL -- 激活时清除拒绝原因
         FROM [Product] P
         JOIN STRING_SPLIT(@productIds, ',') AS IDList ON P.ProductID = TRY_CAST(IDList.value AS UNIQUEIDENTIFIER)
         WHERE P.Status = 'PendingReview'; -- 只激活待审核的商品

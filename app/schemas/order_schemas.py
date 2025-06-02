@@ -27,25 +27,26 @@ class OrderResponseSchema(BaseModel):
     Schema for returning order details.
     Based on Order table fields.
     """
-    order_id: UUID = Field(..., description="Unique ID of the order")
-    seller_id: UUID = Field(..., description="ID of the seller")
-    buyer_id: UUID = Field(..., description="ID of the buyer")
-    product_id: UUID = Field(..., description="ID of the product ordered")
-    quantity: int = Field(..., description="Quantity of the product")
-    trade_time: datetime = Field(..., description="Offline trade time") # 新增交易时间
-    trade_location: str = Field(..., description="Offline trade location") # 新增交易地点
-    status: str = Field(..., description="Current status of the order")
-    created_at: datetime = Field(..., description="Timestamp when the order was created")
-    updated_at: datetime = Field(..., description="Timestamp when the order was last updated")
-    complete_time: Optional[datetime] = Field(None, description="Timestamp when the order was completed")
-    cancel_time: Optional[datetime] = Field(None, description="Timestamp when the order was cancelled")
-    cancel_reason: Optional[str] = Field(None, description="Reason for order cancellation")
-    product_name: Optional[str] = Field(None, description="Name of the product ordered")
-    seller_username: Optional[str] = Field(None, description="Username of the seller")
-    buyer_username: Optional[str] = Field(None, description="Username of the buyer")
+    订单ID: UUID = Field(..., alias="order_id", description="Unique ID of the order")
+    卖家ID: UUID = Field(..., alias="seller_id", description="ID of the seller")
+    买家ID: UUID = Field(..., alias="buyer_id", description="ID of the buyer")
+    商品ID: UUID = Field(..., alias="product_id", description="ID of the product ordered")
+    数量: int = Field(..., alias="quantity", description="Quantity of the product")
+    交易时间: datetime = Field(..., alias="trade_time", description="Offline trade time")
+    交易地点: str = Field(..., alias="trade_location", description="Offline trade location")
+    订单状态: str = Field(..., alias="status", description="Current status of the order")
+    创建时间: datetime = Field(..., alias="created_at", description="Timestamp when the order was created")
+    更新时间: datetime = Field(..., alias="updated_at", description="Timestamp when the order was last updated")
+    完成时间: Optional[datetime] = Field(None, alias="complete_time", description="Timestamp when the order was completed")
+    取消时间: Optional[datetime] = Field(None, alias="cancel_time", description="Timestamp when the order was cancelled")
+    取消原因: Optional[str] = Field(None, alias="cancel_reason", description="Reason for order cancellation")
+    商品名称: Optional[str] = Field(None, alias="product_name", description="Name of the product ordered")
+    卖家用户名: Optional[str] = Field(None, alias="seller_username", description="Username of the seller")
+    买家用户名: Optional[str] = Field(None, alias="buyer_username", description="Username of the buyer")
 
     class Config:
         orm_mode = True
+        populate_by_name = True # Pydantic v2: 允许通过别名填充模型
 
 class OrderStatusUpdateSchema(BaseModel):
     """

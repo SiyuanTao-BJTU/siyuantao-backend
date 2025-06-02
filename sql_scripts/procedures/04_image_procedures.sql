@@ -186,7 +186,7 @@ BEGIN
         COMMIT TRANSACTION; -- 提交事务
 
         -- 返回成功消息 (SQL语句4, 面向UI)
-        SELECT '图片显示顺序更新成功。' AS Result;
+        SELECT '图片显示顺序更新成功。' AS 结果;
 
     END TRY
     BEGIN CATCH
@@ -277,7 +277,7 @@ BEGIN
         COMMIT TRANSACTION; -- 提交事务
 
         -- 返回成功消息 (SQL语句4, 面向UI)
-        SELECT '图片删除成功。' AS Result; -- 返回删除的图片ID或URL可在应用层处理
+        SELECT '图片删除成功。' AS 结果; -- 返回删除的图片ID或URL可在应用层处理
 
     END TRY
     BEGIN CATCH

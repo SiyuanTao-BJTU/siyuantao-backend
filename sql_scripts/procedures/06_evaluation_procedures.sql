@@ -16,14 +16,14 @@ BEGIN
     SET NOCOUNT ON;
     DECLARE @SellerID UNIQUEIDENTIFIER;
     DECLARE @OrderStatus NVARCHAR(50);
-    DECLARE @ProductID UNIQUEIDENTIFIER;
     DECLARE @ErrorMessage NVARCHAR(4000);
+    DECLARE @NewEvaluationID UNIQUEIDENTIFIER = NEWID(); -- 预先生成新的评价ID
 
     BEGIN TRY
         BEGIN TRANSACTION;
 
         -- 检查订单是否存在，是否属于该买家，以及是否已完成
-        SELECT @OrderStatus = O.Status, @SellerID = O.SellerID, @ProductID = O.ProductID
+        SELECT @OrderStatus = O.Status, @SellerID = O.SellerID
         FROM [Order] O
         WHERE O.OrderID = @OrderID AND O.BuyerID = @BuyerID;
 
@@ -55,9 +55,11 @@ BEGIN
 
         -- 插入评价
         INSERT INTO [Evaluation] (EvaluationID, OrderID, BuyerID, SellerID, Rating, Content, CreateTime)
-        VALUES (NEWID(), @OrderID, @BuyerID, @SellerID, @Rating, @Content, GETDATE());
+        VALUES (@NewEvaluationID, @OrderID, @BuyerID, @SellerID, @Rating, @Content, GETDATE());
 
         -- 卖家信用分更新逻辑已移至触发器 tr_Evaluation_AfterInsert_UpdateSellerCredit
+        
+        SELECT @NewEvaluationID AS 评价ID, '评价创建成功' AS 消息;
 
         COMMIT TRANSACTION;
     END TRY

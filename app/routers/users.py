@@ -37,33 +37,19 @@ logger = logging.getLogger(__name__) # Get logger instance
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-@router.get("/me", response_model=UserResponseSchema)
+@router.get("/me", response_model=UserResponseSchema, response_model_by_alias=False)
 async def read_users_me(
-    # current_user: dict = Depends(get_current_user) # Requires JWT authentication
-    current_user: dict = Depends(get_current_authenticated_user), # Use dependency from dependencies.py - ensures user is active
-    conn: pyodbc.Connection = Depends(get_db_connection), # Inject DB connection
-    user_service: UserService = Depends(get_user_service) # Inject Service
+    current_user: dict = Depends(get_current_authenticated_user),
+    conn: pyodbc.Connection = Depends(get_db_connection),
+    user_service: UserService = Depends(get_user_service)
 ):
-    """
-    获取当前登录用户的个人资料。
-    """
-    # get_current_authenticated_user dependency should provide the user ID (e.g., in a dict)
-    # It also ensures the user is active and handles exceptions.
-    user_id = current_user['user_id'] # Access user_id from the dependency's dictionary result
+    logger.debug(f"API /me: current_user from dependency: {current_user}")
+    # The current_user dict from get_current_authenticated_user is already
+    # a dictionary representation of UserResponseSchema (with Chinese keys as primary).
+    # FastAPI will correctly serialize this back to the UserResponseSchema, respecting aliases.
+    return current_user
 
-    try:
-        # Call Service layer function, passing the connection and user_id
-        user_profile = await user_service.get_user_profile_by_id(conn, user_id) # Pass user_id directly (expected to be UUID)
-        return user_profile
-    except NotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    # Authentication and Forbidden errors are handled by get_current_authenticated_user dependency
-    except DALError as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
-
-@router.put("/me", response_model=UserResponseSchema)
+@router.put("/me", response_model=UserResponseSchema, response_model_by_alias=False)
 async def update_current_user_profile(
     user_update_data: UserProfileUpdateSchema, # Request body here
     # current_user: dict = Depends(get_current_user) # Requires JWT authentication
@@ -74,7 +60,7 @@ async def update_current_user_profile(
     """
     更新当前登录用户的个人资料 (不包括密码)。
     """
-    user_id = current_user['user_id'] # Access user_id from the dependency's dictionary result
+    user_id = current_user['用户ID'] # Access with Chinese key as current_user is dict with Chinese keys
 
     try:
         # Call Service layer function, passing the connection and user_id
@@ -101,7 +87,7 @@ async def update_current_user_password(
     """
     更新当前登录用户的密码。
     """
-    user_id = current_user['user_id'] # Access user_id from the dependency's dictionary result
+    user_id = current_user['用户ID'] # Access with Chinese key as current_user is dict with Chinese keys
 
     try:
         # Call Service layer function, passing the connection and user_id
@@ -126,7 +112,7 @@ async def update_current_user_password(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.put("/me/avatar", response_model=UserResponseSchema)
+@router.put("/me/avatar", response_model=UserResponseSchema, response_model_by_alias=False)
 async def upload_my_avatar(
     avatar_file: UploadFile = File(...), # Let FastAPI handle the file upload directly
     current_user: dict = Depends(get_current_authenticated_user),
@@ -136,7 +122,7 @@ async def upload_my_avatar(
     """
     上传或更新当前登录用户的头像。
     """
-    user_id = current_user['user_id']
+    user_id = current_user['用户ID'] # Access with Chinese key
     
     try:
         # 1. Save the uploaded file using the utility function
@@ -162,7 +148,7 @@ async def upload_my_avatar(
 
 # Admin endpoints for user management by ID
 
-@router.get("/{user_id}", response_model=UserResponseSchema)
+@router.get("/{user_id}", response_model=UserResponseSchema, response_model_by_alias=False)
 async def get_user_profile_by_id(
     user_id: UUID, # Path parameter here
     conn: pyodbc.Connection = Depends(get_db_connection), # Inject DB connection
@@ -187,7 +173,7 @@ async def get_user_profile_by_id(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
-@router.put("/{user_id}", response_model=UserResponseSchema)
+@router.put("/{user_id}", response_model=UserResponseSchema, response_model_by_alias=False)
 async def update_user_profile_by_id(
     user_id: UUID, # Path parameter here
     user_update_data: UserProfileUpdateSchema, # Request body here
@@ -243,7 +229,7 @@ async def delete_user_by_id(
 # TODO: Add admin-only endpoints for user management like listing all users, disabling/enabling accounts, etc. 
 
 # Admin endpoint to get all users
-@router.get("/", response_model=list[UserResponseSchema])
+@router.get("/", response_model=list[UserResponseSchema], response_model_by_alias=False)
 async def get_all_users_api(
     conn: pyodbc.Connection = Depends(get_db_connection),
     user_service: UserService = Depends(get_user_service),
@@ -252,16 +238,16 @@ async def get_all_users_api(
     """
     管理员获取所有用户列表。
     """
+    logger.debug(f"API /users (GET ALL): current_admin_user: {current_admin_user.get('用户ID')}") # Access with Chinese key
     try:
-        users = await user_service.get_all_users(conn, current_admin_user["user_id"])
+        users = await user_service.get_all_users(conn, current_admin_user['用户ID'])
         return users
-    except (ForbiddenError, DALError) as e:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN if isinstance(e, ForbiddenError) else status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+    except ForbiddenError as e:
+        logger.warning(f"Forbidden access to get_all_users: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+        logger.error(f"Error in get_all_users_api: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取所有用户失败")
 
 # Admin endpoint to change user status
 @router.put("/{user_id}/status", status_code=status.HTTP_204_NO_CONTENT)
@@ -276,7 +262,7 @@ async def change_user_status_by_id(
     管理员根据用户 ID 更改用户状态（禁用/启用）。
     """
     try:
-        admin_id = current_admin_user.get('UserID') or current_admin_user.get('user_id')
+        admin_id = current_admin_user.get('用户ID') or current_admin_user.get('user_id')
         if not admin_id:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="无法获取管理员用户信息")
         
@@ -303,7 +289,7 @@ async def toggle_user_staff_status(
     """
     超级管理员切换用户的管理员 (is_staff) 状态。
     """
-    super_admin_id = current_super_admin['user_id']  # Extract user_id from the dict
+    super_admin_id = current_super_admin['用户ID']  # Extract user_id from the dict
     try:
         await user_service.toggle_user_staff_status(conn, user_id, super_admin_id)
         return {} # 204 No Content
@@ -333,7 +319,7 @@ async def adjust_user_credit_by_id(
     管理员根据用户 ID 调整用户信用分。
     """
     try:
-        admin_id = current_admin_user.get('UserID') or current_admin_user.get('user_id')
+        admin_id = current_admin_user.get('用户ID') or current_admin_user.get('user_id')
         if not admin_id:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="无法获取管理员用户信息")
             
@@ -354,30 +340,3 @@ async def adjust_user_credit_by_id(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
-
-# Removed email verification routes as they are in auth.py
-# @router.post("/request-verification-email", status_code=status.HTTP_200_OK)
-# async def request_verification_email_api(
-
-# TODO: Add admin-only endpoints for user management like listing all users, disabling/enabling accounts, etc. 
-
-# Admin endpoint to get all users
-@router.get("/", response_model=list[UserResponseSchema])
-async def get_all_users_api(
-    conn: pyodbc.Connection = Depends(get_db_connection),
-    user_service: UserService = Depends(get_user_service),
-    current_admin_user: dict = Depends(get_current_active_admin_user) # Requires admin authentication
-):
-    """
-    管理员获取所有用户列表。
-    """
-    try:
-        users = await user_service.get_all_users(conn, current_admin_user["user_id"])
-        return users
-    except (ForbiddenError, DALError) as e:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN if isinstance(e, ForbiddenError) else status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}") 

@@ -61,7 +61,7 @@ BEGIN
         VALUES (@NewOrderID, @BuyerID, @SellerID, @ProductID, @Quantity, @TradeTime, @TradeLocation, GETDATE(), @OrderStatus);
 
         -- 返回新创建的订单ID，显式转换为 NVARCHAR(36)
-        SELECT CAST(@NewOrderID AS NVARCHAR(36)) AS OrderID; -- 确保通过 SELECT 返回
+        SELECT CAST(@NewOrderID AS NVARCHAR(36)) AS 订单ID; -- 确保通过 SELECT 返回
 
         COMMIT TRANSACTION;
     END TRY
@@ -105,8 +105,11 @@ BEGIN
         END
 
         UPDATE [Order]
-        SET Status = 'ConfirmedBySeller'
+        SET Status = 'ConfirmedBySeller' -- 状态更新
         WHERE OrderID = @OrderID;
+        
+        -- 返回被确认的订单ID
+        SELECT @OrderID AS 订单ID, '订单已确认' AS 消息;
 
         COMMIT TRANSACTION;
     END TRY
@@ -165,6 +168,7 @@ BEGIN
         WHERE OrderID = @OrderID;
 
         -- 注意：卖家信用分更新逻辑已移至触发器 tr_Order_AfterComplete_UpdateSellerCredit
+        SELECT @OrderID AS 订单ID, '订单已完成' AS 消息;
 
         COMMIT TRANSACTION;
     END TRY
@@ -210,6 +214,8 @@ BEGIN
         UPDATE [Order]
         SET Status = 'Cancelled', CancelTime = GETDATE(), CancelReason = ISNULL(@RejectionReason, 'No reason provided.')
         WHERE OrderID = @OrderID;
+        
+        SELECT @OrderID AS 订单ID, '订单已取消' AS 消息; 
 
         -- 库存恢复逻辑已移至触发器 tr_Order_AfterCancel_RestoreQuantity (假设 Rejected 和 Cancelled 都触发库存恢复)
         -- 如果 Rejected 状态的库存恢复逻辑不同，需要单独的触发器或在此处处理。
@@ -238,7 +244,17 @@ BEGIN
 
     IF @UserRole = 'Buyer'
     BEGIN
-        SELECT O.OrderID, O.ProductID, P.ProductName, O.Quantity, O.Quantity * P.Price AS TotalPrice, O.Status AS OrderStatus, O.CreateTime, O.CompleteTime, O.CancelTime, O.SellerID, US.UserName AS SellerUsername
+        SELECT O.OrderID AS 订单ID, 
+               O.ProductID AS 商品ID, 
+               P.ProductName AS 商品名称, 
+               O.Quantity AS 数量, 
+               O.Quantity * P.Price AS 总价, 
+               O.Status AS 订单状态, 
+               O.CreateTime AS 创建时间, 
+               O.CompleteTime AS 完成时间, 
+               O.CancelTime AS 取消时间, 
+               O.SellerID AS 卖家ID, 
+               US.UserName AS 卖家用户名
         FROM [Order] O
         JOIN [Product] P ON O.ProductID = P.ProductID
         JOIN [User] US ON O.SellerID = US.UserID
@@ -247,7 +263,17 @@ BEGIN
     END
     ELSE IF @UserRole = 'Seller'
     BEGIN
-        SELECT O.OrderID, O.ProductID, P.ProductName, O.Quantity, O.Quantity * P.Price AS TotalPrice, O.Status AS OrderStatus, O.CreateTime, O.CompleteTime, O.CancelTime, O.BuyerID, UB.UserName AS BuyerUsername
+        SELECT O.OrderID AS 订单ID, 
+               O.ProductID AS 商品ID, 
+               P.ProductName AS 商品名称, 
+               O.Quantity AS 数量, 
+               O.Quantity * P.Price AS 总价, 
+               O.Status AS 订单状态, 
+               O.CreateTime AS 创建时间, 
+               O.CompleteTime AS 完成时间, 
+               O.CancelTime AS 取消时间, 
+               O.BuyerID AS 买家ID, 
+               UB.UserName AS 买家用户名
         FROM [Order] O
         JOIN [Product] P ON O.ProductID = P.ProductID
         JOIN [User] UB ON O.BuyerID = UB.UserID
@@ -273,22 +299,22 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT
-        O.OrderID AS order_id,
-        O.SellerID AS seller_id,
-        O.BuyerID AS buyer_id,
-        O.ProductID AS product_id,
-        O.Quantity AS quantity,
-        O.TradeTime AS trade_time,
-        O.TradeLocation AS trade_location,
-        O.Status AS status,
-        O.CreateTime AS created_at,
-        O.UpdateTime AS updated_at,
-        O.CompleteTime AS complete_time,
-        O.CancelTime AS cancel_time,
-        O.CancelReason AS cancel_reason,
-        P.ProductName AS product_name,
-        US.UserName AS seller_username,
-        UB.UserName AS buyer_username
+        O.OrderID AS 订单ID,
+        O.SellerID AS 卖家ID,
+        O.BuyerID AS 买家ID,
+        O.ProductID AS 商品ID,
+        O.Quantity AS 数量,
+        O.TradeTime AS 交易时间,
+        O.TradeLocation AS 交易地点,
+        O.Status AS 订单状态,
+        O.CreateTime AS 创建时间,
+        O.UpdateTime AS 更新时间,
+        O.CompleteTime AS 完成时间,
+        O.CancelTime AS 取消时间,
+        O.CancelReason AS 取消原因,
+        P.ProductName AS 商品名称,
+        US.UserName AS 卖家用户名,
+        UB.UserName AS 买家用户名
     FROM [Order] O
     JOIN [Product] P ON O.ProductID = P.ProductID
     JOIN [User] US ON O.SellerID = US.UserID

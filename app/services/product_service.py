@@ -83,7 +83,7 @@ class ProductService:
 
         # 权限检查：只有商品所有者或管理员可以更新
         is_admin_request = current_user.get('is_staff', False)
-        owner_id_from_db = existing_product.get('发布者用户ID') # 从DAL返回的字典中获取
+        owner_id_from_db = existing_product.get('卖家ID') # 从DAL返回的字典中获取
         
         # 将字符串形式的UUID转换为UUID对象进行比较
         try:
@@ -150,7 +150,7 @@ class ProductService:
             raise NotFoundError(f"商品 (ID: {product_id}) 未找到。")
 
         is_admin_request = current_user.get('is_staff', False)
-        owner_id_from_db = existing_product.get('发布者用户ID')
+        owner_id_from_db = existing_product.get('卖家ID')
 
         try:
             if isinstance(owner_id_from_db, str):
@@ -227,7 +227,7 @@ class ProductService:
             raise NotFoundError(f"商品 (ID: {product_id}) 未找到。")
 
         is_admin_request = current_user.get('is_staff', False)
-        owner_id_from_db = existing_product.get('发布者用户ID')
+        owner_id_from_db = existing_product.get('卖家ID')
         
         try:
             if isinstance(owner_id_from_db, str):
@@ -246,10 +246,10 @@ class ProductService:
             raise PermissionError("无权下架此商品。")
             
         # 检查商品当前状态是否允许下架 (例如，不能下架已经售罄或已经被下架的商品)
-        # current_status = existing_product.get('商品状态')
-        # if current_status not in ['Active', 'PendingReview', 'Rejected']: # 根据实际允许下架的状态调整
-        #     logger.warning(f"SERVICE: Product {product_id} is in status '{current_status}' and cannot be withdrawn.")
-        #     raise PermissionError(f"商品当前状态 ({current_status}) 不允许下架。")
+        current_status = existing_product.get('商品状态')
+        if current_status not in ['Active', 'PendingReview', 'Rejected']:
+            logger.warning(f"SERVICE: Product {product_id} is in status '{current_status}' and cannot be withdrawn.")
+            raise PermissionError(f"商品当前状态 ({current_status}) 不允许下架。")
 
         await self.product_dal.withdraw_product(conn, product_id, current_user_id, is_admin_request)
         logger.info(f"SERVICE: Product {product_id} withdrawn successfully by user {current_user_id} (Admin: {is_admin_request}).")

@@ -48,6 +48,7 @@ BEGIN
     IF @currentStatus = @newStatus
     BEGIN
         -- RAISERROR('用户状态已经是 %s，无需更改。', 16, 1, @newStatus); -- 可选提示
+        SELECT '用户状态已经是 ' + @newStatus + '，无需更改。' AS 结果, @userId AS 用户ID, @newStatus AS 当前状态;
         RETURN;
     END
 
@@ -81,7 +82,7 @@ BEGIN
         COMMIT TRANSACTION; -- 提交事务
 
         -- 返回成功消息 (SQL语句5, 面向UI)
-        SELECT '用户状态更新成功。' AS Result, @userId AS 用户ID, @newStatus AS 新状态;
+        SELECT '用户状态更新成功。' AS 结果, @userId AS 用户ID, @newStatus AS 新状态;
 
     END TRY
     BEGIN CATCH
@@ -146,8 +147,9 @@ BEGIN
         -- 如果信用分没有变化，直接返回 (控制流 IF)
         IF @newCredit = @currentCredit
         BEGIN
-             PRINT '用户信用分没有变化，无需更新。'; -- 可选提示
+             -- PRINT '用户信用分没有变化，无需更新。'; -- 可选提示
              COMMIT TRANSACTION; -- 虽然没有更新，但也应提交事务
+             SELECT '用户信用分没有变化，无需更新。' AS 结果, @userId AS 用户ID, @newCredit AS 当前信用分;
              RETURN;
         END
 
@@ -171,7 +173,7 @@ BEGIN
         COMMIT TRANSACTION; -- 提交事务
 
         -- 返回成功消息 (SQL语句5, 面向UI)
-        SELECT '用户信用分调整成功。' AS Result, @userId AS 用户ID, @newCredit AS 新信用分;
+        SELECT '用户信用分调整成功。' AS 结果, @userId AS 用户ID, @newCredit AS 新信用分;
 
     END TRY
     BEGIN CATCH
@@ -233,7 +235,8 @@ BEGIN
 
     IF @currentStatus != 'Pending'
     BEGIN
-        RAISERROR('举报当前状态 (%s) 不允许处理。', 16, 1, @currentStatus);
+        -- RAISERROR('举报当前状态 (%s) 不允许处理。', 16, 1, @currentStatus);
+        SELECT '举报当前状态为 ' + @currentStatus + '，不允许再次处理。' AS 结果, @reportId AS 举报ID, @currentStatus AS 当前状态;
         RETURN;
     END
 
@@ -332,7 +335,7 @@ BEGIN
         COMMIT TRANSACTION; -- 提交事务
 
         -- 返回成功消息 (SQL语句 n, 面向UI)
-        SELECT '举报处理完成。' AS Result, @reportId AS 举报ID, @newStatus AS 新状态;
+        SELECT '举报处理完成。' AS 结果, @reportId AS 举报ID, @newStatus AS 新状态;
 
     END TRY
     BEGIN CATCH
@@ -360,6 +363,7 @@ BEGIN
     SET XACT_ABORT ON; -- 遇到错误自动回滚
 
     DECLARE @adminIsStaff BIT;
+    DECLARE @notificationsSent INT = 0; -- 用于记录发送的通知数量
 
     -- 检查 @adminId 是否为管理员 (SQL语句1)
     SELECT @adminIsStaff = IsStaff FROM [User] WHERE UserID = @adminId;
@@ -391,6 +395,7 @@ BEGIN
             SELECT NEWID(), UserID, @title, @content, GETDATE(), 0
             FROM [User]
             WHERE Status = 'Active'; -- 通常只通知活跃用户，根据需求调整
+            SET @notificationsSent = @@ROWCOUNT;
         END
         ELSE -- ELSE: 插入通知给特定用户。
         BEGIN
@@ -404,12 +409,13 @@ BEGIN
 
             INSERT INTO [SystemNotification] (NotificationID, UserID, Title, Content, CreateTime, IsRead)
             VALUES (NEWID(), @targetUserId, @title, @content, GETDATE(), 0); -- (SQL语句4)
+            SET @notificationsSent = @@ROWCOUNT;
         END
 
         COMMIT TRANSACTION; -- 提交事务
 
         -- 返回成功消息 (SQL语句 n, 面向UI)
-        SELECT '系统通知发布成功。' AS Result, @targetUserId AS 目标用户ID;
+        SELECT '系统通知发布成功。' AS 结果, @notificationsSent AS 发送数量, @targetUserId AS 目标用户ID; -- 调整了目标用户ID的别名
 
     END TRY
     BEGIN CATCH
@@ -422,42 +428,44 @@ END;
 GO
 
 -- New stored procedure to get all users (for admin)
-DROP PROCEDURE IF EXISTS [sp_GetAllUsers];
+-- This procedure already exists in 01_user_procedures.sql as sp_GetAllUsers, and its column names have been updated there.
+-- We will ensure this one is dropped to avoid duplication and potential conflicts.
+DROP PROCEDURE IF EXISTS [sp_GetAllUsers]; 
 GO
-CREATE PROCEDURE [sp_GetAllUsers]
-    @adminId UNIQUEIDENTIFIER -- 需要管理员ID来验证权限
-AS
-BEGIN
-    SET NOCOUNT ON;
+-- CREATE PROCEDURE [sp_GetAllUsers]
+--     @adminId UNIQUEIDENTIFIER -- 需要管理员ID来验证权限
+-- AS
+-- BEGIN
+--     SET NOCOUNT ON;
 
-    DECLARE @adminIsStaff BIT;
+--     DECLARE @adminIsStaff BIT;
 
-    -- 检查 @adminId 是否为管理员
-    SELECT @adminIsStaff = IsStaff FROM [User] WHERE UserID = @adminId;
-    IF @adminIsStaff IS NULL OR @adminIsStaff = 0
-    BEGIN
-        RAISERROR('无权限执行此操作，只有管理员可以查看所有用户。', 16, 1);
-        RETURN;
-    END
+--     -- 检查 @adminId 是否为管理员
+--     SELECT @adminIsStaff = IsStaff FROM [User] WHERE UserID = @adminId;
+--     IF @adminIsStaff IS NULL OR @adminIsStaff = 0
+--     BEGIN
+--         RAISERROR('无权限执行此操作，只有管理员可以查看所有用户。', 16, 1);
+--         RETURN;
+--     END
 
-    -- SQL语句涉及1个表，多个SELECT列
-    SELECT
-        UserID AS 用户ID,
-        UserName AS 用户名,
-        Status AS 账户状态,
-        Credit AS 信用分,
-        IsStaff AS 是否管理员,
-        IsSuperAdmin AS 是否超级管理员,
-        IsVerified AS 是否已认证,
-        Major AS 专业,
-        Email AS 邮箱,
-        AvatarUrl AS 头像URL,
-        Bio AS 个人简介,
-        PhoneNumber AS 手机号码,
-        JoinTime AS 注册时间
-    FROM [User];
-END;
-GO
+--     -- SQL语句涉及1个表，多个SELECT列
+--     SELECT
+--         UserID AS 用户ID,
+--         UserName AS 用户名,
+--         Status AS 账户状态,
+--         Credit AS 信用分,
+--         IsStaff AS 是否管理员,
+--         IsSuperAdmin AS 是否超级管理员,
+--         IsVerified AS 是否已认证,
+--         Major AS 专业,
+--         Email AS 邮箱,
+--         AvatarUrl AS 头像URL,
+--         Bio AS 个人简介,
+--         PhoneNumber AS 手机号码,
+--         JoinTime AS 注册时间
+--     FROM [User];
+-- END;
+-- GO
 
 -- sp_BatchReviewProducts: 管理员批量审核商品
 -- 输入: @productIds NVARCHAR(MAX) (逗号分隔的商品ID字符串), @adminId UNIQUEIDENTIFIER, @newStatus NVARCHAR(20) ('Active'或'Rejected'), @reason NVARCHAR(500) (如果拒绝)
@@ -515,7 +523,8 @@ BEGIN
         -- 更新符合条件的商品状态
         UPDATE P
         SET
-            Status = @newStatus
+            Status = @newStatus,
+            AuditReason = CASE WHEN @newStatus = 'Rejected' THEN @reason ELSE NULL END -- 只有拒绝时设置原因，通过时清除
         FROM [Product] P
         JOIN @ProductIDsTable T ON P.ProductID = T.ProductID
         WHERE P.Status = 'PendingReview'; -- 只处理待审核状态的商品
@@ -535,20 +544,21 @@ BEGIN
                 WHEN @newStatus = 'Rejected' THEN N'商品批量审核未通过'
             END,
             CASE
-                WHEN @newStatus = 'Active' THEN N'您的部分商品已批量审核通过，当前状态为 Active (在售)。' -- 实际内容可以更详细，列出商品名称等
-                WHEN @newStatus = 'Rejected' THEN N'您的部分商品未通过批量审核，状态为 Rejected (已拒绝)。原因: ' + ISNULL(@reason, N'未说明') -- 同样，实际内容可以更详细
+                WHEN @newStatus = 'Active' THEN N'您的部分商品已批量审核通过，当前状态为 Active (在售)。商品ID: ' + STRING_AGG(CAST(P.ProductID AS NVARCHAR(36)), ', ') WITHIN GROUP (ORDER BY P.ProductID) -- 聚合商品ID
+                WHEN @newStatus = 'Rejected' THEN N'您的部分商品未通过批量审核，状态为 Rejected (已拒绝)。原因: ' + ISNULL(@reason, N'未说明') + N'。商品ID: ' + STRING_AGG(CAST(P.ProductID AS NVARCHAR(36)), ', ') WITHIN GROUP (ORDER BY P.ProductID)
             END,
             GETDATE(),
             0
         FROM [Product] P
         JOIN @ProductIDsTable T ON P.ProductID = T.ProductID -- 仅为本次处理的商品创建通知
-        WHERE P.Status = @newStatus; -- 只通知那些状态确实被改变了的商品 (已从PendingReview变为新状态)
+        WHERE P.Status = @newStatus -- 只通知那些状态确实被改变了的商品 (已从PendingReview变为新状态)
+        GROUP BY P.OwnerID; -- 按OwnerID分组，为每个OwnerID发送一条聚合通知
 
 
         COMMIT TRANSACTION;
 
         -- 返回成功处理的数量
-        SELECT @successCount AS SuccessCount;
+        SELECT @successCount AS 成功数量;
 
     END TRY
     BEGIN CATCH
