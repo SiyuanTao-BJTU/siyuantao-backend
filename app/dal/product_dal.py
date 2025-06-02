@@ -294,13 +294,16 @@ class ProductDAL:
 
         # 根据 owner_id 是否存在来调整 SQL 语句和参数
         if owner_id is not None:
-            logger.debug(f"DAL.get_product_list: owner_id is not None ({owner_id}). Passing UUID directly.")
-            sql = "{CALL sp_GetProductList(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}" # 10个参数，owner_id作为最后一个参数
-            params_to_execute = initial_params + (owner_id,)
+            logger.debug(f"DAL.get_product_list: owner_id is not None ({owner_id}). Converting UUID to string for pyodbc.")
+            # Convert UUID to string for pyodbc, as some drivers handle this better
+            owner_id_param = str(owner_id)
+            sql = "{CALL sp_GetProductList(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}"
+            params_to_execute = initial_params + (owner_id_param,)
             logger.debug(f"DAL.get_product_list: Parameters for execution: {params_to_execute}")
         else:
-            logger.debug("DAL.get_product_list: owner_id is None. Appending None to parameters.")
-            sql = "{CALL sp_GetProductList(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}" # 10个参数，最后一个是NULL for @ownerId
+            logger.debug("DAL.get_product_list: owner_id is None. Passing pyodbc.SQL_NULL.")
+            sql = "{CALL sp_GetProductList(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}"
+            # Explicitly pass pyodbc.SQL_NULL for None owner_id
             params_to_execute = initial_params + (None,)
             logger.debug(f"DAL.get_product_list: Parameters for execution: {params_to_execute}")
 
