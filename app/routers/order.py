@@ -31,7 +31,7 @@ async def create_new_order(
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
     
     try:
-        user_id = uuid.UUID(user_id_str) # 将str转换为UUID
+        user_id = user_id_str # 直接使用 UUID 对象
         # Service层负责具体的业务逻辑和调用DAL
         new_order = await order_service.create_order(conn, order_data, user_id)
         return new_order
@@ -67,7 +67,7 @@ async def update_order_status_route(
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
     try:
-        user_id = uuid.UUID(user_id_str)
+        user_id = user_id_str # 直接使用 UUID 对象
         updated_order = await order_service.update_order_status(
             conn, 
             order_id=order_id, 
@@ -107,7 +107,7 @@ async def get_my_orders(
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
     try:
-        user_id = uuid.UUID(user_id_str)
+        user_id = user_id_str # 直接使用 UUID 对象
         # 假设这里 is_seller 默认为 False，如果需要获取卖家订单，可能需要另一个路由或额外的查询参数
         orders = await order_service.get_orders_by_user(conn, user_id, is_seller=False, status=status, page_number=page_number, page_size=page_size)
         return orders
@@ -133,7 +133,7 @@ async def get_order_by_id_route(
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
     try:
-        user_id = uuid.UUID(user_id_str)
+        user_id = user_id_str # 直接使用 UUID 对象
         order = await order_service.get_order_by_id(conn, order_id, requesting_user_id=user_id)
         if not order:
             raise NotFoundError("订单未找到")
@@ -169,7 +169,7 @@ async def delete_order_route(
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
     try:
-        user_id = uuid.UUID(user_id_str)
+        user_id = user_id_str # 直接使用 UUID 对象
         await order_service.delete_order(conn, order_id, user_id)
         # 成功删除通常返回 204 No Content
         return
@@ -208,7 +208,7 @@ async def cancel_order_route(
          raise HTTPException(status_code=fastapi.status.HTTP_400_BAD_REQUEST, detail="取消原因不能为空")
 
     try:
-        user_id = uuid.UUID(user_id_str)
+        user_id = user_id_str # 直接使用 UUID 对象
         await order_service.cancel_order(conn, order_id, user_id, cancel_reason)
         # 成功取消通常返回 204 No Content
         return
@@ -241,7 +241,7 @@ async def confirm_order_route(
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
     
     try:
-        user_id = uuid.UUID(user_id_str)
+        user_id = user_id_str # 直接使用 UUID 对象
         updated_order = await order_service.confirm_order(conn, order_id, user_id)
         return updated_order
     except IntegrityError as e:
@@ -273,7 +273,7 @@ async def complete_order_route(
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
     try:
-        user_id = uuid.UUID(user_id_str)
+        user_id = user_id_str # 直接使用 UUID 对象
         updated_order = await order_service.complete_order(conn, order_id, user_id)
         return updated_order
     except IntegrityError as e:
@@ -310,7 +310,7 @@ async def reject_order_route(
         raise HTTPException(status_code=fastapi.status.HTTP_400_BAD_REQUEST, detail="拒绝原因不能为空")
 
     try:
-        user_id = uuid.UUID(user_id_str)
+        user_id = user_id_str # 直接使用 UUID 对象
         updated_order = await order_service.reject_order(conn, order_id, user_id, rejection_reason)
         return updated_order
     except IntegrityError as e:

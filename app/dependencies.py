@@ -19,6 +19,7 @@ from app.dal.base import execute_query
 from app.dal.connection import get_db_connection
 from app.utils.email_sender import send_email
 from app.schemas.user_schemas import UserResponseSchema, TokenData
+from app.exceptions import NotFoundError, IntegrityError, ForbiddenError, PermissionError, DALError
 
 import logging
 logger = logging.getLogger(__name__)

@@ -16,7 +16,8 @@ class OrderCreateSchema(BaseModel):
     """
     product_id: UUID = Field(..., description="ID of the product being ordered")
     quantity: int = Field(..., gt=0, description="Quantity of the product")
-    total_price: float = Field(..., gt=0, description="Total price of the order") # 添加 total_price 字段
+    trade_time: datetime = Field(..., description="Offline trade time") # 新增交易时间
+    trade_location: str = Field(..., max_length=255, description="Offline trade location") # 新增交易地点
 
     class Config:
         orm_mode = True # 允许从 ORM 模型创建 Schema 实例
@@ -31,13 +32,17 @@ class OrderResponseSchema(BaseModel):
     buyer_id: UUID = Field(..., description="ID of the buyer")
     product_id: UUID = Field(..., description="ID of the product ordered")
     quantity: int = Field(..., description="Quantity of the product")
-    total_price: float = Field(..., description="Total price of the order") # 使用 float 对应 DECIMAL(10, 2)
+    trade_time: datetime = Field(..., description="Offline trade time") # 新增交易时间
+    trade_location: str = Field(..., description="Offline trade location") # 新增交易地点
     status: str = Field(..., description="Current status of the order")
     created_at: datetime = Field(..., description="Timestamp when the order was created")
     updated_at: datetime = Field(..., description="Timestamp when the order was last updated")
     complete_time: Optional[datetime] = Field(None, description="Timestamp when the order was completed")
     cancel_time: Optional[datetime] = Field(None, description="Timestamp when the order was cancelled")
     cancel_reason: Optional[str] = Field(None, description="Reason for order cancellation")
+    product_name: Optional[str] = Field(None, description="Name of the product ordered")
+    seller_username: Optional[str] = Field(None, description="Username of the seller")
+    buyer_username: Optional[str] = Field(None, description="Username of the buyer")
 
     class Config:
         orm_mode = True

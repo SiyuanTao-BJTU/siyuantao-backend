@@ -1359,10 +1359,10 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
     try:
         cursor.execute(
             """
-            INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, CreateTime, Status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, UpdateTime, Status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            order1_id, alice_id, bob_id, product1_id, 1, datetime.now(), "Completed"
+            order1_id, alice_id, bob_id, product1_id, 1, datetime.now(), "大学图书馆", datetime.now(), datetime.now(), "Completed"
         )
         logger.info("Order 1 inserted.")
     except pyodbc.Error as e:
@@ -1391,10 +1391,10 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
     try:
         cursor.execute(
             """
-            INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, CreateTime, Status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, UpdateTime, Status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            order2_id, bob_id, alice_id, product2_id, 1, datetime.now(), "ConfirmedBySeller" # Still pending completion
+            order2_id, bob_id, alice_id, product2_id, 1, datetime.now(), "学生活动中心", datetime.now(), datetime.now(), "ConfirmedBySeller" # Still pending completion
         )
         logger.info("Order 2 inserted.")
     except pyodbc.Error as e:
@@ -1439,10 +1439,10 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
     try:
         cursor.execute(
             """
-            INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, CreateTime, Status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, UpdateTime, Status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            order3_id, alice_id, david_id, product3_id, 1, datetime.now(), "PendingSellerConfirmation"
+            order3_id, alice_id, david_id, product3_id, 1, datetime.now(), "教学楼A栋", datetime.now(), datetime.now(), "PendingSellerConfirmation"
         )
         logger.info("Order 3 inserted.")
     except pyodbc.Error as e:
@@ -1458,10 +1458,10 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
     try:
         cursor.execute(
             """
-            INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, CreateTime, Status, CompleteTime)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, UpdateTime, Status, CompleteTime)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            order4_id, david_id, lucy_id, product9_id, 1, datetime.now(), "Completed", datetime.now()
+            order4_id, david_id, lucy_id, product9_id, 1, datetime.now(), "宿舍楼下", datetime.now(), datetime.now(), "Completed", datetime.now()
         )
         logger.info("Order 4 inserted.")
     except pyodbc.Error as e:
@@ -1490,10 +1490,10 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
         try:
             cursor.execute(
                 """
-                INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, CreateTime, Status)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, UpdateTime, Status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                order_pxk_cyq_shoes, cyq_id, pxk_id, product12_id, 1, datetime.now(), "Completed"
+                order_pxk_cyq_shoes, cyq_id, pxk_id, product12_id, 1, datetime.now(), "学校南门", datetime.now(), datetime.now(), "Completed"
             )
             logger.info("Order (Pxk buys Cyq's Sports Shoes) inserted.")
         except pyodbc.Error as e:
@@ -1524,10 +1524,10 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
         try:
             cursor.execute(
                 """
-                INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, CreateTime, Status)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, UpdateTime, Status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                order_cy_ssc_guitar, ssc_id, cy_id, product14_id, 1, datetime.now(), "PendingSellerConfirmation"
+                order_cy_ssc_guitar, ssc_id, cy_id, product14_id, 1, datetime.now(), "艺术楼排练室", datetime.now(), datetime.now(), "PendingSellerConfirmation"
             )
             logger.info("Order (Cy buys Ssc's Guitar) inserted.")
         except pyodbc.Error as e:
@@ -1558,10 +1558,10 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
         try:
             cursor.execute(
                 """
-                INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, CreateTime, Status)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, UpdateTime, Status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                order_zsq_pxk_monitor, pxk_id, zsq_id, product17_id, 1, datetime.now(), "Completed"
+                order_zsq_pxk_monitor, pxk_id, zsq_id, product17_id, 1, datetime.now(), "图书馆门口", datetime.now(), datetime.now(), "Completed"
             )
             logger.info("Order (Zsq buys Pxk's Monitor) inserted.")
         except pyodbc.Error as e:

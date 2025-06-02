@@ -6,13 +6,13 @@
 DROP PROCEDURE IF EXISTS [sp_GetProductById];
 GO
 CREATE PROCEDURE [sp_GetProductById]
-    @productId UNIQUEIDENTIFIER
+    @ProductID UNIQUEIDENTIFIER
 AS
 BEGIN
     SET NOCOUNT ON;
 
     -- 检查商品是否存在 (SQL语句1)
-    IF NOT EXISTS (SELECT 1 FROM [Product] WHERE ProductID = @productId)
+    IF NOT EXISTS (SELECT 1 FROM [Product] WHERE ProductID = @ProductID)
     BEGIN
         -- 可以选择不RAISERROR，而是返回空结果集，让服务层处理商品未找到的逻辑
         -- RAISERROR('商品不存在。', 16, 1);
@@ -22,27 +22,23 @@ BEGIN
 
     -- 获取商品详情 (SQL语句2)
     SELECT
-        p.ProductID AS 商品ID,
-        p.OwnerID AS 发布者用户ID, -- 新增，用于权限检查
-        p.ProductName AS 商品名称,
-        p.Description AS 商品描述,
-        p.Quantity AS 库存,
-        p.Price AS 价格,
-        p.PostTime AS 发布时间,
-        p.Status AS 商品状态,
-        u.UserName AS 发布者用户名,
-        p.CategoryName AS 商品类别,
-        -- 获取所有图片URL (SQL语句3)
-        STUFF((
-            SELECT ',' + ImageURL
-            FROM [ProductImage]
-            WHERE ProductID = p.ProductID
-            ORDER BY SortOrder, UploadTime
-            FOR XML PATH('')
-        ), 1, 1, '') AS ImageURLs -- 返回逗号分隔的图片URL字符串
-    FROM [Product] p
-    JOIN [User] u ON p.OwnerID = u.UserID
-    WHERE p.ProductID = @productId;
+        P.ProductID AS product_id,
+        P.ProductName AS product_name,
+        P.Description AS description,
+        P.Quantity AS quantity,
+        P.Price AS price,
+        P.PostTime AS post_time,
+        P.Status AS status,
+        P.OwnerID AS owner_id,
+        C.CategoryName AS category_name,
+        (SELECT TOP 1 ImageURL FROM [ProductImage] WHERE ProductID = P.ProductID ORDER BY SortOrder) AS main_image_url,
+        STUFF((SELECT ',' + ImageURL FROM [ProductImage] WHERE ProductID = P.ProductID ORDER BY SortOrder FOR XML PATH('')), 1, 1, '') AS image_urls,
+        U.UserName AS owner_username,
+        P.Condition AS condition
+    FROM [Product] P
+    JOIN [Category] C ON P.CategoryID = C.CategoryID
+    JOIN [User] U ON P.OwnerID = U.UserID
+    WHERE P.ProductID = @ProductID;
 
 END;
 GO
@@ -71,17 +67,17 @@ BEGIN
 
     SET @sql = N'
     SELECT
-        p.ProductID AS 商品ID,
-        p.ProductName AS 商品名称,
-        p.Description AS 商品描述,
-        p.Quantity AS 库存,
-        p.Price AS 价格,
-        p.PostTime AS 发布时间,
-        p.Status AS 商品状态,
-        u.UserName AS 发布者用户名,
-        p.CategoryName AS 商品类别,
-        pi.ImageURL AS 主图URL,
-        COUNT(p.ProductID) OVER() AS 总商品数
+        p.ProductID AS product_id,
+        p.ProductName AS product_name,
+        p.Description AS description,
+        p.Quantity AS quantity,
+        p.Price AS price,
+        p.PostTime AS post_time,
+        p.Status AS status,
+        u.UserName AS owner_username,
+        p.CategoryName AS category_name,
+        pi.ImageURL AS main_image_url,
+        COUNT(p.ProductID) OVER() AS total_products
     FROM [Product] p
     JOIN [User] u ON p.OwnerID = u.UserID
     LEFT JOIN [ProductImage] pi ON p.ProductID = pi.ProductID AND pi.SortOrder = 0
@@ -242,15 +238,15 @@ BEGIN
         -- 返回更新后的商品基本信息 (SQL语句3, 面向UI)
         -- 这里复用sp_GetProductDetail的一部分逻辑或调用它
         SELECT
-            p.ProductID AS 商品ID,
-            p.ProductName AS 商品名称,
-            p.Description AS 商品描述,
-            p.Quantity AS 库存,
-            p.Price AS 价格,
-            p.PostTime AS 发布时间,
-            p.Status AS 商品状态,
-            u.UserName AS 发布者用户名,
-            p.CategoryName AS 商品类别
+            p.ProductID AS product_id,
+            p.ProductName AS product_name,
+            p.Description AS description,
+            p.Quantity AS quantity,
+            p.Price AS price,
+            p.PostTime AS post_time,
+            p.Status AS status,
+            u.UserName AS owner_username,
+            p.CategoryName AS category_name
         FROM [Product] p
         JOIN [User] u ON p.OwnerID = u.UserID
         WHERE p.ProductID = @productId;
@@ -656,18 +652,18 @@ BEGIN
 
     -- 获取用户收藏的商品列表 (SQL语句2, 涉及 UserFavorite, Product 2个表，可以通过JOIN User表达到3个表)
     SELECT
-        p.ProductID AS 商品ID,
-        p.ProductName AS 商品名称,
-        p.Description AS 商品描述,
-        p.Quantity AS 库存,
-        p.Price AS 价格,
-        p.PostTime AS 发布时间,
-        p.Status AS 商品状态,
-        u_owner.UserName AS 发布者用户名,
-        p.CategoryName AS 商品类别,
-        uf.FavoriteTime AS 收藏时间,
+        p.ProductID AS product_id,
+        p.ProductName AS product_name,
+        p.Description AS description,
+        p.Quantity AS quantity,
+        p.Price AS price,
+        p.PostTime AS post_time,
+        p.Status AS status,
+        u_owner.UserName AS owner_username,
+        p.CategoryName AS category_name,
+        uf.FavoriteTime AS favorite_time,
         -- 获取主图URL (SQL语句3, 涉及 ProductImage)
-        (SELECT TOP 1 ImageURL FROM [ProductImage] pi WHERE pi.ProductID = p.ProductID AND pi.SortOrder = 0 ORDER BY UploadTime ASC) AS 主图URL
+        (SELECT TOP 1 ImageURL FROM [ProductImage] pi WHERE pi.ProductID = p.ProductID AND pi.SortOrder = 0 ORDER BY UploadTime ASC) AS main_image_url
     FROM [UserFavorite] uf
     JOIN [Product] p ON uf.ProductID = p.ProductID -- JOIN Product
     JOIN [User] u_owner ON p.OwnerID = u_owner.UserID -- JOIN User (达到3个表要求)
@@ -718,9 +714,6 @@ BEGIN
         -- TODO: 触发器 tr_Product_AfterUpdate_QuantityStatus 会处理 Quantity=0 时状态变为Sold
 
         COMMIT TRANSACTION;
-
-        -- 返回成功信息或新库存
-        SELECT '库存减少成功。' AS Result, Quantity AS 新库存 FROM [Product] WHERE ProductID = @productId;
 
     END TRY
     BEGIN CATCH
@@ -774,9 +767,6 @@ BEGIN
          -- TODO: 触发器 tr_Product_AfterUpdate_QuantityStatus 会处理 Quantity > 0 时状态变为Active (如果原状态是Sold)
 
         COMMIT TRANSACTION;
-
-        -- 返回成功信息或新库存
-        SELECT '库存增加成功。' AS Result, Quantity AS 新库存 FROM [Product] WHERE ProductID = @productId;
 
     END TRY
     BEGIN CATCH

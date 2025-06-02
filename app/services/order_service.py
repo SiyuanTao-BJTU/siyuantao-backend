@@ -3,6 +3,7 @@ from uuid import UUID
 from typing import List, Optional, Dict, Any
 
 from app.dal.orders_dal import OrdersDAL
+from app.dal.product_dal import ProductDAL
 from app.schemas.order_schemas import (
     OrderCreateSchema, 
     OrderResponseSchema,
@@ -14,8 +15,9 @@ from app.exceptions import DALError, NotFoundError, ForbiddenError
 class OrderService:
     """Service layer for order management."""
 
-    def __init__(self, order_dal: OrdersDAL):
+    def __init__(self, order_dal: OrdersDAL, product_dal: ProductDAL):
         self.order_dal = order_dal
+        self.product_dal = product_dal
 
     async def create_order(
         self, 
@@ -28,7 +30,9 @@ class OrderService:
                 conn=conn,
                 product_id=order_data.product_id,
                 buyer_id=buyer_id,
-                quantity=order_data.quantity
+                quantity=order_data.quantity,
+                trade_time=order_data.trade_time,
+                trade_location=order_data.trade_location
             )
             
             if created_order_id is None:

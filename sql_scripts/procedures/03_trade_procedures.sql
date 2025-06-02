@@ -9,11 +9,15 @@ GO
 CREATE PROCEDURE [sp_CreateOrder]
     @BuyerID UNIQUEIDENTIFIER,
     @ProductID UNIQUEIDENTIFIER,
-    @Quantity INT
+    @Quantity INT,
+    @TradeTime DATETIME,        -- 新增：交易时间
+    @TradeLocation NVARCHAR(255) -- 新增：交易地点
+    -- @NewOrderID_Output UNIQUEIDENTIFIER OUTPUT -- 移除此行
 AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @ProductPrice DECIMAL(10, 2);
+    DECLARE @NewOrderID UNIQUEIDENTIFIER; -- 重新引入局部变量
+    DECLARE @ProductPrice DECIMAL(10, 2); -- 移除：不再需要内部计算商品价格
     DECLARE @ProductStock INT;
     DECLARE @SellerID UNIQUEIDENTIFIER;
     DECLARE @OrderStatus NVARCHAR(50) = 'PendingSellerConfirmation'; -- 初始状态为待处理
@@ -30,12 +34,12 @@ BEGIN
         END
 
         -- 获取商品信息并锁定商品行以防止并发问题
-        SELECT @ProductPrice = Price, @ProductStock = Quantity, @SellerID = OwnerID
+        SELECT @ProductStock = Quantity, @SellerID = OwnerID
         FROM [Product]
         WITH (UPDLOCK) -- 在事务中锁定行，直到事务结束
         WHERE ProductID = @ProductID AND Status = 'Active';
 
-        IF @ProductPrice IS NULL
+        IF @ProductStock IS NULL -- 检查商品是否存在
         BEGIN
             SET @ErrorMessage = '创建订单失败：商品不存在或非在售状态。';
             THROW 50002, @ErrorMessage, 1;
@@ -44,16 +48,20 @@ BEGIN
         -- 检查库存是否充足
         IF @ProductStock < @Quantity
         BEGIN
-            SET @ErrorMessage = '创建订单失败：商品库存不足。';
+            SET @ErrorMessage = '创建订单失败：商品库存不足。当前库存: ' + CAST(@ProductStock AS NVARCHAR(10)) + ', 购买数量: ' + CAST(@Quantity AS NVARCHAR(10));
             THROW 50003, @ErrorMessage, 1;
         END
 
         -- 扣减库存
         EXEC sp_DecreaseProductQuantity @productId = @ProductID, @quantityToDecrease = @Quantity;
 
-        -- 创建订单
-        INSERT INTO [Order] (OrderID, BuyerID, SellerID, ProductID, Quantity, CreateTime, Status)
-        VALUES (NEWID(), @BuyerID, @SellerID, @ProductID, @Quantity, GETDATE(), @OrderStatus);
+        -- 生成新的 OrderID 并创建订单
+        SET @NewOrderID = NEWID(); -- 赋值给局部变量
+        INSERT INTO [Order] (OrderID, BuyerID, SellerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, Status)
+        VALUES (@NewOrderID, @BuyerID, @SellerID, @ProductID, @Quantity, @TradeTime, @TradeLocation, GETDATE(), @OrderStatus);
+
+        -- 返回新创建的订单ID，显式转换为 NVARCHAR(36)
+        SELECT CAST(@NewOrderID AS NVARCHAR(36)) AS OrderID; -- 确保通过 SELECT 返回
 
         COMMIT TRANSACTION;
     END TRY
@@ -61,7 +69,7 @@ BEGIN
         IF @@TRANCOUNT > 0
             ROLLBACK TRANSACTION;
         
-        THROW;
+        THROW; -- 重新抛出错误，包含原始错误信息和行号
     END CATCH
 END;
 GO
@@ -251,5 +259,40 @@ BEGIN
         DECLARE @ErrorMessage NVARCHAR(4000) = '获取订单失败：无效的用户角色。';
         THROW 50011, @ErrorMessage, 1;
     END
+END;
+GO
+
+-- sp_GetOrderById: 根据订单ID获取订单详情
+-- 功能: 获取指定订单的详细信息
+DROP PROCEDURE IF EXISTS [sp_GetOrderById];
+GO
+CREATE PROCEDURE [sp_GetOrderById]
+    @OrderID UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        O.OrderID AS order_id,
+        O.SellerID AS seller_id,
+        O.BuyerID AS buyer_id,
+        O.ProductID AS product_id,
+        O.Quantity AS quantity,
+        O.TradeTime AS trade_time,
+        O.TradeLocation AS trade_location,
+        O.Status AS status,
+        O.CreateTime AS created_at,
+        O.UpdateTime AS updated_at,
+        O.CompleteTime AS complete_time,
+        O.CancelTime AS cancel_time,
+        O.CancelReason AS cancel_reason,
+        P.ProductName AS product_name,
+        US.UserName AS seller_username,
+        UB.UserName AS buyer_username
+    FROM [Order] O
+    JOIN [Product] P ON O.ProductID = P.ProductID
+    JOIN [User] US ON O.SellerID = US.UserID
+    JOIN [User] UB ON O.BuyerID = UB.UserID
+    WHERE O.OrderID = @OrderID;
 END;
 GO

@@ -101,16 +101,16 @@ class UserService:
         if not user_data:
             raise AuthenticationError("用户名/邮箱或密码不正确")
 
-        if not verify_password(password, user_data['Password']):
+        if not verify_password(password, user_data['password']):
             raise AuthenticationError("用户名/邮箱或密码不正确")
 
-        user_id = UUID(str(user_data['UserID']))
-        is_staff = user_data.get("IsStaff", False)
-        is_verified = user_data.get("IsVerified", False)
+        user_id = UUID(str(user_data['userid']))
+        is_staff = user_data.get("isstaff", False)
+        is_verified = user_data.get("isverified", False)
         
-        logger.debug(f"Checking status for user: {user_data['UserName']} (Status: {user_data['Status']})")
-        if user_data['Status'] != "Active":
-            raise AuthenticationError(f"用户 {user_data['UserName']} 账户已被禁用或不活跃。")
+        logger.debug(f"Checking status for user: {user_data['username']} (Status: {user_data['status']})")
+        if user_data['status'] != "Active":
+            raise AuthenticationError(f"用户 {user_data['username']} 账户已被禁用或不活跃。")
 
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
@@ -121,10 +121,10 @@ class UserService:
             "is_staff": is_staff,
             "is_verified": is_verified
         }
-        logger.debug(f"Creating JWT token for user: {user_data['UserName']}")
+        logger.debug(f"Creating JWT token for user: {user_data['username']}")
         access_token = create_access_token(payload, expires_delta=access_token_expires)
 
-        logger.info(f"Authentication successful, token created for user: {user_data['UserName']}")
+        logger.info(f"Authentication successful, token created for user: {user_data['username']}")
         return access_token
 
     async def get_user_profile_by_id(self, conn: pyodbc.Connection, user_id: UUID) -> UserResponseSchema:
@@ -547,7 +547,7 @@ class UserService:
         # Manually construct dict for UserResponseSchema, ensuring all fields are present
         # and types are correct.
         converted_data = {
-            "user_id": dal_user_data.get("用户ID"),
+            "user_id": UUID(dal_user_data["用户id"]) if dal_user_data.get("用户id") else None, # 确保获取小写的 '用户id' 键，并进行 UUID 转换
             "username": dal_user_data.get("用户名"),
             "email": dal_user_data.get("邮箱"),
             "status": dal_user_data.get("账户状态"),
@@ -556,7 +556,7 @@ class UserService:
             "is_super_admin": dal_user_data.get("是否超级管理员", False),
             "is_verified": dal_user_data.get("是否已认证", False),
             "major": dal_user_data.get("专业"),
-            "avatar_url": dal_user_data.get("头像URL"),
+            "avatar_url": dal_user_data.get("头像url"), # 将 '头像URL' 改为 '头像url'
             "bio": dal_user_data.get("个人简介"),
             "phone_number": dal_user_data.get("手机号码"),
             "join_time": dal_user_data.get("注册时间"),

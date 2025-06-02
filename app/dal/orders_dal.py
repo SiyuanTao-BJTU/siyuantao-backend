@@ -3,8 +3,11 @@ from typing import List, Optional, Dict, Any, Callable, Awaitable
 from app.dal.base import execute_query, execute_non_query
 from app.exceptions import DALError, NotFoundError, IntegrityError, ForbiddenError
 from uuid import UUID # 导入 UUID
-# 假设订单相关的 Pydantic schemas 在 app.schemas.order_schemas 中定义 (如果需要强类型返回)
-# from app.schemas.order_schemas import OrderSchema # 示例
+from datetime import datetime # 导入 datetime
+import asyncio
+import logging # 确保导入 logging
+
+logger = logging.getLogger(__name__) # 初始化 logger
 
 class OrdersDAL:
     """
@@ -28,24 +31,25 @@ class OrdersDAL:
         buyer_id: UUID, 
         product_id: UUID, 
         quantity: int, 
-        shipping_address: str, 
-        contact_phone: str
+        trade_time: datetime, # 移除 total_price，新增 trade_time
+        trade_location: str # 新增 trade_location
     ) -> UUID:
         """
         Calls the sp_CreateOrder stored procedure to create a new order.
         Assumes sp_CreateOrder is modified to SELECT SCOPE_IDENTITY() AS OrderID at the end.
         """
-        sql = "{CALL sp_CreateOrder (?, ?, ?, ?, ?)}"
-        params = (str(buyer_id), str(product_id), quantity, shipping_address, contact_phone) # 转换为字符串
+        sql = "{CALL sp_CreateOrder (?, ?, ?, ?, ?)}" # 更新 SQL，匹配新参数数量
+        params = (str(buyer_id), str(product_id), quantity, trade_time, trade_location) # 更新参数列表
         try:
             # Use the stored generic execution function and pass conn
+            logger.debug(f"DAL: Executing sp_CreateOrder with SQL: {sql}, Params: {params}") # 添加日志
             result = await self._execute_query(conn, sql, params, fetchone=True) # Assuming fetchone is supported
+            logger.debug(f"DAL: sp_CreateOrder returned raw result: {result}") # 添加日志
             if result and result.get("OrderID") is not None: # Check if OrderID key exists and is not None
                 return UUID(result["OrderID"]) # 转换为 UUID
-            # This case should ideally not be reached if SP guarantees OrderID or throws error
-            # Consider if the generic execute_query handles this case better.
-            # Re-raising the original exception from _execute_query might be better.
-            raise DALError("Failed to create order or retrieve OrderID: SP did not return OrderID.")
+            else:
+                # 如果存储过程没有返回预期结果，或者OrderID为None
+                raise DALError("Stored procedure sp_CreateOrder did not return a valid OrderID.")
         except pyodbc.Error as e:
             # Fallback error handling if the generic function doesn't map all errors
             error_msg = str(e)
@@ -113,7 +117,7 @@ class OrdersDAL:
                 raise ForbiddenError(f"完成订单失败: {error_msg}") from e
             elif "50008" in error_msg: # 订单状态不正确
                 raise IntegrityError(f"完成订单失败: {error_msg}") from e
-            raise DALError(f"无法完成订单 {order_id}: {error_msg}") from e
+            raise DALError(f"完成订单 {order_id} 时发生意外错误: {e}") from e
         except Exception as e:
             raise DALError(f"完成订单 {order_id} 时发生意外错误: {e}") from e
 

@@ -70,6 +70,8 @@ CREATE TABLE [Order] (
     [BuyerID] UNIQUEIDENTIFIER NOT NULL,                    -- 买家用户ID，不允许为空
     [ProductID] UNIQUEIDENTIFIER NOT NULL,                  -- 购买的商品ID，不允许为空
     [Quantity] INT NOT NULL CHECK ([Quantity] >= 1),        -- 购买数量，不允许为空，必须大于等于1
+    [TradeTime] DATETIME NOT NULL,                          -- 交易时间，不允许为空
+    [TradeLocation] NVARCHAR(255) NOT NULL,                 -- 交易地点，不允许为空
     [CreateTime] DATETIME NOT NULL DEFAULT GETDATE(),       -- 订单创建时间，不允许为空，默认当前系统时间
     [Status] NVARCHAR(50) NOT NULL                          -- 订单状态，不允许为空
         CHECK ([Status] IN (
@@ -78,6 +80,7 @@ CREATE TABLE [Order] (
             'Completed',                 -- 订单完成（买家已收货或交易已结束）
             'Cancelled'                  -- 订单取消（包括线下验货时买家取消）
         )),
+    [UpdateTime] DATETIME NOT NULL DEFAULT GETDATE(),       -- 新增：订单更新时间，不允许为空，默认当前系统时间
     [CompleteTime] DATETIME NULL,                           -- 订单完成时间，可为空
     [CancelTime] DATETIME NULL,                             -- 订单取消时间，可为空
     [CancelReason] NVARCHAR(500) NULL,                      -- 订单取消原因，可为空

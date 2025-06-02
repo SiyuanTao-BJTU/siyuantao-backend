@@ -41,12 +41,31 @@ async def execute_query(
     try:
         await loop.run_in_executor(None, cursor.execute, sql, params if params is not None else ())
 
+        # 遍历所有结果集，直到找到包含数据的结果集或没有更多结果集
+        # 存储过程可能返回多个结果集（例如，先UPDATE后SELECT），我们需要获取正确的那个
+        result_set_found = False
+        while True:
+            if cursor.description:
+                # 找到包含描述（列信息）的结果集，这意味着有数据或至少是空表结果
+                result_set_found = True
+                break
+            else:
+                # 如果没有描述，尝试移动到下一个结果集
+                more_results = await loop.run_in_executor(None, cursor.nextset)
+                if not more_results:
+                    # 没有更多结果集，退出循环
+                    break
+        
+        if not result_set_found:
+            # 如果遍历完所有结果集都没有找到有效结果集，则返回 None
+            return None
+
         if fetchone:
-            columns = [column[0] for column in cursor.description]
+            columns = [column[0].lower() for column in cursor.description]
             row = await loop.run_in_executor(None, cursor.fetchone)
             return dict(zip(columns, row)) if row else None
         elif fetchall:
-            columns = [column[0] for column in cursor.description]
+            columns = [column[0].lower() for column in cursor.description]
             rows = await loop.run_in_executor(None, cursor.fetchall)
             return [dict(zip(columns, row)) for row in rows] if rows else []
         else:
