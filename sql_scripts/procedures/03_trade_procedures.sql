@@ -232,25 +232,40 @@ END;
 GO
 
 -- sp_GetOrdersByUser: 根据用户ID获取订单列表
--- 功能: 获取指定用户的订单列表，可根据角色区分买家或卖家订单
+-- 功能: 获取指定用户的订单列表，可根据角色区分买家或卖家订单，并支持状态筛选和分页
 DROP PROCEDURE IF EXISTS [sp_GetOrdersByUser];
 GO
 CREATE PROCEDURE [sp_GetOrdersByUser]
     @UserID UNIQUEIDENTIFIER,
-    @UserRole NVARCHAR(50)
+    @UserRole NVARCHAR(50),
+    @StatusFilter NVARCHAR(50) = NULL, -- 新增：状态筛选参数
+    @PageNumber INT = 1,               -- 新增：页码参数
+    @PageSize INT = 10                 -- 新增：每页大小参数
 AS
 BEGIN
     SET NOCOUNT ON;
 
+    DECLARE @Sql NVARCHAR(MAX);
+    DECLARE @Params NVARCHAR(MAX);
+    DECLARE @WhereClause NVARCHAR(MAX) = N'';
+
+    IF @StatusFilter IS NOT NULL AND @StatusFilter <> ''
+    BEGIN
+        SET @WhereClause = @WhereClause + N' AND O.Status = @InnerStatusFilter';
+    END
+
     IF @UserRole = 'Buyer'
     BEGIN
+        SET @Sql = N'
         SELECT O.OrderID AS 订单ID, 
                O.ProductID AS 商品ID, 
                P.ProductName AS 商品名称, 
                O.Quantity AS 数量, 
-               O.Quantity * P.Price AS 总价, 
+               O.TradeTime AS 交易时间,
+               O.TradeLocation AS 交易地点,
                O.Status AS 订单状态, 
                O.CreateTime AS 创建时间, 
+               O.UpdateTime AS 更新时间,
                O.CompleteTime AS 完成时间, 
                O.CancelTime AS 取消时间, 
                O.SellerID AS 卖家ID, 
@@ -258,18 +273,22 @@ BEGIN
         FROM [Order] O
         JOIN [Product] P ON O.ProductID = P.ProductID
         JOIN [User] US ON O.SellerID = US.UserID
-        WHERE O.BuyerID = @UserID
-        ORDER BY O.CreateTime DESC;
+        WHERE O.BuyerID = @InnerUserID' + @WhereClause + N'
+        ORDER BY O.CreateTime DESC
+        OFFSET @InnerOffset ROWS FETCH NEXT @InnerPageSize ROWS ONLY;';
     END
-    ELSE IF @UserRole = 'Seller'
+     ELSE IF @UserRole = 'Seller'
     BEGIN
+        SET @Sql = N'
         SELECT O.OrderID AS 订单ID, 
                O.ProductID AS 商品ID, 
                P.ProductName AS 商品名称, 
                O.Quantity AS 数量, 
-               O.Quantity * P.Price AS 总价, 
+               O.TradeTime AS 交易时间,
+               O.TradeLocation AS 交易地点,
                O.Status AS 订单状态, 
                O.CreateTime AS 创建时间, 
+               O.UpdateTime AS 更新时间,
                O.CompleteTime AS 完成时间, 
                O.CancelTime AS 取消时间, 
                O.BuyerID AS 买家ID, 
@@ -277,14 +296,27 @@ BEGIN
         FROM [Order] O
         JOIN [Product] P ON O.ProductID = P.ProductID
         JOIN [User] UB ON O.BuyerID = UB.UserID
-        WHERE O.SellerID = @UserID
-        ORDER BY O.CreateTime DESC;
+        WHERE O.SellerID = @InnerUserID' + @WhereClause + N'
+        ORDER BY O.CreateTime DESC
+        OFFSET @InnerOffset ROWS FETCH NEXT @InnerPageSize ROWS ONLY;';
     END
     ELSE
     BEGIN
         DECLARE @ErrorMessage NVARCHAR(4000) = '获取订单失败：无效的用户角色。';
         THROW 50011, @ErrorMessage, 1;
+        RETURN;
     END
+
+    SET @Params = N'@InnerUserID UNIQUEIDENTIFIER, @InnerStatusFilter NVARCHAR(50), @InnerOffset INT, @InnerPageSize INT';
+
+    -- 计算 OFFSET 值
+    DECLARE @Offset INT = (@PageNumber - 1) * @PageSize;
+
+    EXEC sp_executesql @Sql, @Params, 
+                       @InnerUserID = @UserID, 
+                       @InnerStatusFilter = @StatusFilter, 
+                       @InnerOffset = @Offset, 
+                       @InnerPageSize = @PageSize;
 END;
 GO
 

@@ -8,7 +8,7 @@ import fastapi
 from app.schemas.order_schemas import OrderCreateSchema, OrderResponseSchema, OrderStatusUpdateSchema 
 # 假设的Service和依赖路径，请根据您的项目结构调整
 from app.services.order_service import OrderService
-from app.dependencies import get_current_user, get_db_connection, get_order_service
+from app.dependencies import get_current_authenticated_user, get_db_connection, get_order_service
 
 # 假设的异常类路径，请根据您的项目结构调整
 from app.exceptions import IntegrityError, ForbiddenError, NotFoundError, DALError
@@ -18,7 +18,7 @@ router = APIRouter()
 @router.post("/", response_model=OrderResponseSchema, status_code=fastapi.status.HTTP_201_CREATED, response_model_by_alias=False)
 async def create_new_order(
     order_data: OrderCreateSchema,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_authenticated_user),
     conn: pyodbc.Connection = Depends(get_db_connection),
     order_service: OrderService = Depends(get_order_service)
 ):
@@ -53,7 +53,7 @@ async def create_new_order(
 async def update_order_status_route(
     status_update: OrderStatusUpdateSchema, # Body first
     order_id: uuid.UUID = Path(..., title="The ID of the order to update"), # Path param with default
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_authenticated_user),
     conn: pyodbc.Connection = Depends(get_db_connection),
     order_service: OrderService = Depends(get_order_service)
 ):
@@ -91,7 +91,7 @@ async def update_order_status_route(
 
 @router.get("/mine", response_model=List[OrderResponseSchema], response_model_by_alias=False)
 async def get_my_orders(
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_authenticated_user),
     conn: pyodbc.Connection = Depends(get_db_connection),
     order_service: OrderService = Depends(get_order_service),
     status: str = Query(None), # 添加status查询参数
@@ -121,7 +121,7 @@ async def get_my_orders(
 @router.get("/{order_id}", response_model=OrderResponseSchema, response_model_by_alias=False)
 async def get_order_by_id_route(
     order_id: uuid.UUID = Path(..., title="The ID of the order to retrieve"),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_authenticated_user),
     conn: pyodbc.Connection = Depends(get_db_connection),
     order_service: OrderService = Depends(get_order_service)
 ):
@@ -155,7 +155,7 @@ async def get_order_by_id_route(
 @router.delete("/{order_id}", status_code=fastapi.status.HTTP_204_NO_CONTENT)
 async def delete_order_route(
     order_id: uuid.UUID = Path(..., title="The ID of the order to delete"),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_authenticated_user),
     conn: pyodbc.Connection = Depends(get_db_connection),
     order_service: OrderService = Depends(get_order_service)
 ):
@@ -190,7 +190,7 @@ async def delete_order_route(
 async def cancel_order_route(
     cancel_reason_data: dict, # Assuming a simple dict for reason
     order_id: uuid.UUID = Path(..., title="The ID of the order to cancel"),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_authenticated_user),
     conn: pyodbc.Connection = Depends(get_db_connection),
     order_service: OrderService = Depends(get_order_service)
 ):
@@ -229,7 +229,7 @@ async def cancel_order_route(
 @router.put("/{order_id}/confirm", response_model=OrderResponseSchema, response_model_by_alias=False)
 async def confirm_order_route(
     order_id: uuid.UUID = Path(..., title="The ID of the order to confirm"),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_authenticated_user),
     conn: pyodbc.Connection = Depends(get_db_connection),
     order_service: OrderService = Depends(get_order_service)
 ):
@@ -261,7 +261,7 @@ async def confirm_order_route(
 @router.put("/{order_id}/complete", response_model=OrderResponseSchema, response_model_by_alias=False)
 async def complete_order_route(
     order_id: uuid.UUID = Path(..., title="The ID of the order to complete"),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_authenticated_user),
     conn: pyodbc.Connection = Depends(get_db_connection),
     order_service: OrderService = Depends(get_order_service)
 ):
@@ -293,7 +293,7 @@ async def complete_order_route(
 @router.put("/{order_id}/reject", response_model=OrderResponseSchema, response_model_by_alias=False)
 async def reject_order_route(
     order_id: uuid.UUID = Path(..., title="The ID of the order to reject"),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_authenticated_user),
     conn: pyodbc.Connection = Depends(get_db_connection),
     order_service: OrderService = Depends(get_order_service),
     rejection_reason_data: dict = Body(..., embed=True) # Assuming reason is in body

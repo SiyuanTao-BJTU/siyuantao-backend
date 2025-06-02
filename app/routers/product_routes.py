@@ -162,48 +162,45 @@ async def batch_activate_products(
     conn: pyodbc.Connection = Depends(get_db_connection)
 ):
     """
-    管理员批量激活商品
-    
-    Args:
-        request_data: 包含 product_ids 的字典
-        admin: 当前认证的管理员用户
-        product_service: 商品服务依赖
-        conn: 数据库连接
-    
-    Returns:
-        成功激活的商品数量
-    
-    Raises:
-        HTTPException: 批量激活失败时返回相应的HTTP错误
+    Batch activate products by an admin.
+    - **request_data**: Dictionary containing a list of product_ids. Expected key: "product_ids".
+    - **admin**: Admin user performing the action.
     """
-    admin_id = admin["用户ID"] # Use Chinese key
-    try:
-        product_ids_str = request_data.get("product_ids")
-        if not product_ids_str or not isinstance(product_ids_str, list):
-            raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail="商品ID列表缺失或格式不正确")
-        
-        # Convert string UUIDs to UUID objects for the service layer
-        product_ids_uuid = []
-        for pid_str in product_ids_str:
-            try:
-                product_ids_uuid.append(UUID(pid_str))
-            except ValueError:
-                raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=f"无效的商品ID格式: {pid_str}")
+    product_ids_str = request_data.get("product_ids")
+    if not product_ids_str:
+        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail="请求体中必须包含 'product_ids' 列表。")
 
-        affected_count = await product_service.batch_activate_products(conn, product_ids_uuid, admin_id)
-        return {"message": f"成功激活 {affected_count} 件商品"}
-    except NotFoundError as e:
-        logger.error(f"Error activating product(s) during batch activation: {e}")
+    try:
+        # Attempt to convert all product_id strings to UUIDs
+        product_ids_uuid = [UUID(pid) for pid in product_ids_str]
+    except ValueError:
+        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail="一个或多个 'product_ids' 无效。")
+    
+    logger.info(f"Router: Batch activating products by admin {admin.get('user_id')}: {product_ids_uuid}") # Use .get for safer access
+    admin_id_uuid = admin["user_id"] # Use English key
+
+
+    # Check if product_ids_uuid is empty after validation (though ValueErro might catch it earlier if format is wrong)
+    if not product_ids_uuid:
+        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail="商品ID列表不能为空。")
+
+    try:
+        # Ensure admin_id_uuid is a UUID if it's not already (it should be from the token)
+        # admin_id_uuid = UUID(admin.get("user_id"))
+
+        activated_count = await product_service.batch_activate_products(conn, product_ids_uuid, admin_id_uuid) # Pass admin_id_uuid
+        return {"message": f"成功激活 {activated_count} 个商品。", "activated_count": activated_count}
+    except HTTPException as e: # Re-raise HTTPExceptions
+        raise e
+    except NotFoundError as e: # Example: if ProductService can raise this for some IDs
+        logger.warning(f"NotFoundError in batch_activate_products: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_404_NOT_FOUND, detail=str(e))
-    except PermissionError as e:
-        logger.error(f"Permission denied during batch activation: {e}")
+    except PermissionError as e: # Catch specific permission errors
+        logger.warning(f"PermissionError in batch_activate_products: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_403_FORBIDDEN, detail=str(e))
-    except (ValueError, DALError) as e: # Group ValueError and DALError for 400
-        logger.error(f"Error during batch activation: {e}")
-        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Unexpected error rejecting product by admin {admin['用户ID'] if admin else 'N/A'}: {e}", exc_info=True) # Use Chinese key
-        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+        logger.error(f"Unexpected error in batch_activate_products: {e}", exc_info=True)
+        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail="批量激活商品时发生内部错误")
 
 @router.post("/batch/reject", response_model_by_alias=False)
 async def batch_reject_products(
@@ -213,50 +210,47 @@ async def batch_reject_products(
     conn: pyodbc.Connection = Depends(get_db_connection)
 ):
     """
-    管理员批量拒绝商品
-    
-    Args:
-        request_data: 包含 product_ids 和 reason 的字典
-        admin: 当前认证的管理员用户
-        product_service: 商品服务依赖
-        conn: 数据库连接
-    
-    Returns:
-        成功拒绝的商品数量
-    
-    Raises:
-        HTTPException: 批量拒绝失败时返回相应的HTTP错误
+    Batch reject products by an admin.
+    - **request_data**: Dictionary containing a list of product_ids and a reason.
+                      Expected keys: "product_ids", "reason".
+    - **admin**: Admin user performing the action.
     """
-    admin_id = admin["用户ID"] # Use Chinese key
-    try:
-        product_ids_str = request_data.get("product_ids")
-        reason = request_data.get("reason") # Extract reason from request_data
-        if not product_ids_str or not isinstance(product_ids_str, list):
-            raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail="商品ID列表缺失或格式不正确")
-        
-        # Convert string UUIDs to UUID objects for the service layer
-        product_ids_uuid = []
-        for pid_str in product_ids_str:
-            try:
-                product_ids_uuid.append(UUID(pid_str))
-            except ValueError:
-                raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=f"无效的商品ID格式: {pid_str}")
+    product_ids_str = request_data.get("product_ids")
+    reason = request_data.get("reason")
 
-        affected_count = await product_service.batch_reject_products(conn, product_ids_uuid, admin_id, reason) # Pass reason
-        return {"message": f"成功拒绝 {affected_count} 件商品"}
+    if not product_ids_str:
+        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail="请求体中必须包含 'product_ids' 列表。")
+    if not reason:
+        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail="请求体中必须包含 'reason'。")
+
+    try:
+        product_ids_uuid = [UUID(pid) for pid in product_ids_str]
+    except ValueError:
+        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail="一个或多个 'product_ids' 无效。")
+
+    logger.info(f"Router: Batch rejecting products by admin {admin.get('user_id')} with reason '{reason}': {product_ids_uuid}") # Use .get for safer access
+    admin_id_uuid = admin["user_id"] # Use English key
+
+    if not product_ids_uuid: # Check if list is empty after potential filtering or if input was just '[]'
+        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail="商品ID列表不能为空。")
+    
+    try:
+        # Ensure admin_id_uuid is a UUID
+        # admin_id_uuid = UUID(admin.get("user_id"))
+
+        rejected_count = await product_service.batch_reject_products(conn, product_ids_uuid, admin_id_uuid, reason) # Pass admin_id_uuid
+        return {"message": f"成功拒绝 {rejected_count} 个商品。", "rejected_count": rejected_count}
+    except HTTPException as e: # Re-raise HTTPExceptions
+        raise e
     except NotFoundError as e:
-        logger.error(f"Product(s) not found during batch rejection: {e}")
+        logger.warning(f"NotFoundError in batch_reject_products: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_404_NOT_FOUND, detail=str(e))
     except PermissionError as e:
-        logger.error(f"Permission denied during batch rejection: {e}")
+        logger.warning(f"PermissionError in batch_reject_products: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_403_FORBIDDEN, detail=str(e))
-    except (ValueError, DALError) as e: # Group ValueError and DALError for 400
-        logger.error(f"Error during batch rejection: {e}")
-        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        log_admin_id = admin_id if admin_id is not None else "N/A"
-        logger.error(f"An unexpected error occurred while batch rejecting products for admin {log_admin_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+        logger.error(f"Unexpected error in batch_reject_products: {e}", exc_info=True)
+        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail="批量拒绝商品时发生内部错误")
 
 @router.post("/{product_id}/favorite", status_code=fastapi_status.HTTP_201_CREATED, response_model_by_alias=False)
 async def add_favorite(product_id: UUID, user: dict = Depends(get_current_authenticated_user), # Changed type hint to dict
@@ -367,37 +361,27 @@ async def activate_product(product_id: UUID, admin: dict = Depends(get_current_a
                             product_service: ProductService = Depends(get_product_service),
                             conn: pyodbc.Connection = Depends(get_db_connection)):
     """
-    管理员激活商品
-    
-    Args:
-        product_id: 商品ID
-        admin: 当前认证的管理员用户
-        product_service: 商品服务依赖
-        conn: 数据库连接
-    
-    Returns:
-        操作结果消息
-    
-    Raises:
-        HTTPException: 激活失败时返回相应的HTTP错误
+    Activate a product by an admin.
+    - **product_id**: UUID of the product to activate.
+    - **admin**: Admin user performing the action.
     """
-    admin_id = admin["用户ID"] # Use Chinese key
     try:
-        await product_service.activate_product(conn, product_id, admin_id) # 传入UUID类型
-        return {"message": "商品已成功激活"}
+        logger.info(f"Router: Activating product {product_id} by admin {admin.get('user_id')}") # Use .get for safer access
+        admin_id = admin["user_id"] # Use English key
+        await product_service.activate_product(conn, product_id, admin_id) # Pass admin_id (UUID)
+        return {"message": "商品激活成功"}
+    except HTTPException as e:
+        logger.error(f"HTTPException in activate_product: {e.detail}")
+        raise e
     except NotFoundError as e:
-        logger.error(f"Product with ID {product_id} not found for activation: {e}")
+        logger.warning(f"NotFoundError in activate_product: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_404_NOT_FOUND, detail=str(e))
-    except PermissionError as e:
-        logger.error(f"Permission denied for activating product: {e}")
+    except PermissionError as e: # Catch specific permission errors if ProductService raises them
+        logger.warning(f"PermissionError in activate_product: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_403_FORBIDDEN, detail=str(e))
-    except (ValueError, DALError) as e: # Group ValueError and DALError for 400
-        logger.error(f"Error activating product {product_id}: {e}")
-        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        log_admin_id = admin_id if admin_id is not None else "N/A"
-        logger.error(f"An unexpected error occurred while activating product for admin {log_admin_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+        logger.error(f"Unexpected error in activate_product for product {product_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail="激活商品时发生内部错误")
 
 @router.put("/{product_id}/status/reject", response_model_by_alias=False)
 async def reject_product(product_id: UUID, request_data: dict,
@@ -405,42 +389,31 @@ async def reject_product(product_id: UUID, request_data: dict,
                             product_service: ProductService = Depends(get_product_service),
                             conn: pyodbc.Connection = Depends(get_db_connection)):
     """
-    管理员拒绝商品
-    
-    Args:
-        product_id: 商品ID
-        request_data: 包含拒绝原因的字典 (e.g., {"reason": "不符合发布规范"})
-        admin: 当前认证的管理员用户
-        product_service: 商品服务依赖
-        conn: 数据库连接
-    
-    Returns:
-        操作结果消息
-    
-    Raises:
-        HTTPException: 拒绝失败时返回相应的HTTP错误
+    Reject a product by an admin.
+    - **product_id**: UUID of the product to reject.
+    - **request_data**: Dictionary containing the rejection reason. Expected key: "reason".
+    - **admin**: Admin user performing the action.
     """
-    admin_id = admin["用户ID"] # Use Chinese key
     try:
         reason = request_data.get("reason")
-        if reason is None:
-            raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail="拒绝原因不可为空")
-        
-        await product_service.reject_product(conn, product_id, admin_id, reason)
-        return {"message": "商品已成功拒绝"}
+        if not reason:
+            raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail="拒绝商品必须提供原因")
+        logger.info(f"Router: Rejecting product {product_id} by admin {admin.get('user_id')} with reason: {reason}")
+        admin_id = admin["user_id"] # Use English key
+        await product_service.reject_product(conn, product_id, admin_id, reason) # Pass admin_id (UUID)
+        return {"message": "商品拒绝成功"}
+    except HTTPException as e:
+        logger.error(f"HTTPException in reject_product: {e.detail}")
+        raise e
     except NotFoundError as e:
-        logger.error(f"Product with ID {product_id} not found for rejection: {e}")
+        logger.warning(f"NotFoundError in reject_product: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_404_NOT_FOUND, detail=str(e))
     except PermissionError as e:
-        logger.error(f"Permission denied for rejecting product: {e}")
+        logger.warning(f"PermissionError in reject_product: {e}")
         raise HTTPException(status_code=fastapi_status.HTTP_403_FORBIDDEN, detail=str(e))
-    except (ValueError, DALError) as e: # Group ValueError and DALError for 400
-        logger.error(f"Error rejecting product {product_id}: {e}")
-        raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        log_admin_id = admin_id if admin_id is not None else "N/A"
-        logger.error(f"An unexpected error occurred while rejecting product for admin {log_admin_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+        logger.error(f"Unexpected error in reject_product for product {product_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail="拒绝商品时发生内部错误")
 
 @router.put("/{product_id}/status/withdraw", status_code=fastapi_status.HTTP_204_NO_CONTENT)
 async def withdraw_product(product_id: UUID, 

@@ -61,10 +61,11 @@ class ProductDAL:
         logger.info(f"DAL: Executing sp_CreateProduct with params: {params}")
         try:
             result = await self._execute_query(conn, sql, params, fetchone=True)
-            if result and 'NewProductId' in result:
-                return UUID(result['NewProductId'])
+            if result and '新商品ID' in result:
+                return UUID(result['新商品ID'])
             else:
-                raise DatabaseError("Failed to retrieve new product ID after creation.")
+                logger.error(f"DAL: Failed to retrieve new product ID. Result was: {result}")
+                raise DatabaseError("创建商品后未能检索到新商品ID。")
         except pyodbc.Error as e:
             logger.error(f"DAL Error creating product: {e}")
             raise DALError(f"Database error creating product: {e}") from e

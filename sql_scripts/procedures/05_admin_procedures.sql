@@ -432,40 +432,40 @@ GO
 -- We will ensure this one is dropped to avoid duplication and potential conflicts.
 DROP PROCEDURE IF EXISTS [sp_GetAllUsers]; 
 GO
--- CREATE PROCEDURE [sp_GetAllUsers]
---     @adminId UNIQUEIDENTIFIER -- 需要管理员ID来验证权限
--- AS
--- BEGIN
---     SET NOCOUNT ON;
+CREATE PROCEDURE [sp_GetAllUsers]
+    @adminId UNIQUEIDENTIFIER -- 需要管理员ID来验证权限
+AS
+BEGIN
+    SET NOCOUNT ON;
 
---     DECLARE @adminIsStaff BIT;
+    DECLARE @adminIsStaff BIT;
 
---     -- 检查 @adminId 是否为管理员
---     SELECT @adminIsStaff = IsStaff FROM [User] WHERE UserID = @adminId;
---     IF @adminIsStaff IS NULL OR @adminIsStaff = 0
---     BEGIN
---         RAISERROR('无权限执行此操作，只有管理员可以查看所有用户。', 16, 1);
---         RETURN;
---     END
+    -- 检查 @adminId 是否为管理员
+    SELECT @adminIsStaff = IsStaff FROM [User] WHERE UserID = @adminId;
+    IF @adminIsStaff IS NULL OR @adminIsStaff = 0
+    BEGIN
+        RAISERROR('无权限执行此操作，只有管理员可以查看所有用户。', 16, 1);
+        RETURN;
+    END
 
---     -- SQL语句涉及1个表，多个SELECT列
---     SELECT
---         UserID AS 用户ID,
---         UserName AS 用户名,
---         Status AS 账户状态,
---         Credit AS 信用分,
---         IsStaff AS 是否管理员,
---         IsSuperAdmin AS 是否超级管理员,
---         IsVerified AS 是否已认证,
---         Major AS 专业,
---         Email AS 邮箱,
---         AvatarUrl AS 头像URL,
---         Bio AS 个人简介,
---         PhoneNumber AS 手机号码,
---         JoinTime AS 注册时间
---     FROM [User];
--- END;
--- GO
+    -- SQL语句涉及1个表，多个SELECT列
+    SELECT
+        UserID AS 用户ID,
+        UserName AS 用户名,
+        Status AS 账户状态,
+        Credit AS 信用分,
+        IsStaff AS 是否管理员,
+        IsSuperAdmin AS 是否超级管理员,
+        IsVerified AS 是否已认证,
+        Major AS 专业,
+        Email AS 邮箱,
+        AvatarUrl AS 头像URL,
+        Bio AS 个人简介,
+        PhoneNumber AS 手机号码,
+        JoinTime AS 注册时间
+    FROM [User];
+END;
+GO
 
 -- sp_BatchReviewProducts: 管理员批量审核商品
 -- 输入: @productIds NVARCHAR(MAX) (逗号分隔的商品ID字符串), @adminId UNIQUEIDENTIFIER, @newStatus NVARCHAR(20) ('Active'或'Rejected'), @reason NVARCHAR(500) (如果拒绝)

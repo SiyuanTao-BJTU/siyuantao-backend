@@ -45,8 +45,8 @@ class OrdersDAL:
             logger.debug(f"DAL: Executing sp_CreateOrder with SQL: {sql}, Params: {params}") # 添加日志
             result = await self._execute_query(conn, sql, params, fetchone=True) # Assuming fetchone is supported
             logger.debug(f"DAL: sp_CreateOrder returned raw result: {result}") # 添加日志
-            if result and result.get("OrderID") is not None: # Check if OrderID key exists and is not None
-                return UUID(result["OrderID"]) # 转换为 UUID
+            if result and result.get("订单ID") is not None: # 检查键名改为 "订单ID"
+                return UUID(result["订单ID"]) # 获取键名改为 "订单ID"
             else:
                 # 如果存储过程没有返回预期结果，或者OrderID为None
                 raise DALError("Stored procedure sp_CreateOrder did not return a valid OrderID.")
@@ -192,7 +192,11 @@ class OrdersDAL:
         (Assumes sp_GetOrdersByUser exists as per documentation)
         """
         sql = "{CALL sp_GetOrdersByUser (?, ?, ?, ?, ?)}"
-        params = (str(user_id), is_seller, status, page_number, page_size) # 转换为字符串
+        
+        # Convert is_seller boolean to the string role expected by the stored procedure
+        user_role_str = "Seller" if is_seller else "Buyer"
+        
+        params = (str(user_id), user_role_str, status, page_number, page_size) # Use user_role_str
         try:
             # Use the stored generic execution function and pass conn
             orders = await self._execute_query(conn, sql, params, fetchall=True) # Assuming fetchall is supported

@@ -65,7 +65,7 @@ class ProductService:
         Args:
             conn: 数据库连接对象
             product_id: 要更新的商品ID
-            current_user: 当前操作用户 (字典类型，包含 user_id, is_staff 等)
+            current_user: 当前操作用户 (字典类型，包含 用户ID, 是否管理员 等中文键名)
             product_update_data: 包含要更新的商品信息的 ProductUpdate schema
         
         Raises:
@@ -73,57 +73,50 @@ class ProductService:
             PermissionError: 无权限操作
             DatabaseError: 数据库操作失败
         """
-        logger.info(f"SERVICE: User {current_user.get('user_id')} attempting to update product {product_id} with data: {product_update_data.model_dump(exclude_none=True)}")
+        logger.info(f"SERVICE: User {current_user.get('用户ID')} attempting to update product {product_id} with data: {product_update_data.model_dump(exclude_none=True)}")
         
-        # 检查商品是否存在
         existing_product = await self.product_dal.get_product_by_id(conn, product_id)
         if not existing_product:
             logger.warning(f"SERVICE: Product {product_id} not found for update.")
             raise NotFoundError(f"商品 (ID: {product_id}) 未找到。")
 
-        # 权限检查：只有商品所有者或管理员可以更新
-        is_admin_request = current_user.get('is_staff', False)
-        owner_id_from_db = existing_product.get('卖家ID') # 从DAL返回的字典中获取
+        is_admin_request = current_user.get('是否管理员', False) # 使用中文键
+        owner_id_from_db = existing_product.get('卖家ID')
         
-        # 将字符串形式的UUID转换为UUID对象进行比较
         try:
             if isinstance(owner_id_from_db, str):
                 owner_id_from_db_uuid = UUID(owner_id_from_db)
             elif isinstance(owner_id_from_db, UUID):
                 owner_id_from_db_uuid = owner_id_from_db
             else:
-                owner_id_from_db_uuid = None # 或者抛出错误，如果获取不到有效的owner_id
+                owner_id_from_db_uuid = None
         except ValueError:
             logger.error(f"SERVICE: Invalid OwnerID format '{owner_id_from_db}' for product {product_id}.")
-            # 这种情况下，应该认为权限检查失败或数据有问题
             raise PermissionError("无法验证商品所有权。")
 
-
-        current_user_id = current_user.get('user_id')
+        current_user_id = current_user.get('用户ID') # 使用中文键
         if not is_admin_request and owner_id_from_db_uuid != current_user_id:
             logger.warning(f"SERVICE: User {current_user_id} (not owner or admin) attempted to update product {product_id} owned by {owner_id_from_db_uuid}.")
             raise PermissionError("无权修改此商品。")
 
-        # 如果是更新图片，先删除旧图片，再添加新图片
         if product_update_data.image_urls is not None:
             logger.info(f"SERVICE: Updating images for product {product_id}. New URLs: {product_update_data.image_urls}")
             await self.product_image_dal.delete_product_images_by_product_id(conn, product_id)
             for i, url in enumerate(product_update_data.image_urls):
                 await self.product_image_dal.add_product_image(conn, product_id, url, sort_order=i)
         
-        # 从 product_update_data 中提取其他字段进行更新
-        update_args = product_update_data.model_dump(exclude_unset=True, exclude={'image_urls'}) # 排除 image_urls，因为它已单独处理
+        update_args = product_update_data.model_dump(exclude_unset=True, exclude={'image_urls'})
 
         await self.product_dal.update_product(
             conn,
             product_id=product_id,
-            current_operator_id=current_user_id, # 传递操作者ID
+            current_operator_id=current_user_id,
             category_name=update_args.get('category_name'),
             product_name=update_args.get('product_name'),
             description=update_args.get('description'),
             quantity=update_args.get('quantity'),
             price=update_args.get('price'),
-            condition=update_args.get('condition'), # 添加 condition
+            condition=update_args.get('condition'),
             is_admin_request=is_admin_request
         )
         logger.info(f"SERVICE: Product {product_id} updated successfully by user {current_user_id} (Admin: {is_admin_request}).")
@@ -135,21 +128,21 @@ class ProductService:
         Args:
             conn: 数据库连接对象
             product_id: 要删除的商品ID
-            current_user: 当前操作用户 (字典类型，包含 user_id, is_staff 等)
+            current_user: 当前操作用户 (字典类型，包含 用户ID, 是否管理员 等中文键名)
 
         Raises:
             NotFoundError: 商品未找到
             PermissionError: 无权限操作
             DatabaseError: 数据库操作失败
         """
-        logger.info(f"SERVICE: User {current_user.get('user_id')} attempting to delete product {product_id}")
+        logger.info(f"SERVICE: User {current_user.get('用户ID')} attempting to delete product {product_id}")
         
         existing_product = await self.product_dal.get_product_by_id(conn, product_id)
         if not existing_product:
             logger.warning(f"SERVICE: Product {product_id} not found for deletion.")
             raise NotFoundError(f"商品 (ID: {product_id}) 未找到。")
 
-        is_admin_request = current_user.get('is_staff', False)
+        is_admin_request = current_user.get('是否管理员', False) # 使用中文键
         owner_id_from_db = existing_product.get('卖家ID')
 
         try:
@@ -163,7 +156,7 @@ class ProductService:
             logger.error(f"SERVICE: Invalid OwnerID format '{owner_id_from_db}' for product {product_id} during delete.")
             raise PermissionError("无法验证商品所有权以进行删除。")
 
-        current_user_id = current_user.get('user_id')
+        current_user_id = current_user.get('用户ID') # 使用中文键
         if not is_admin_request and owner_id_from_db_uuid != current_user_id:
             logger.warning(f"SERVICE: User {current_user_id} (not owner or admin) attempted to delete product {product_id} owned by {owner_id_from_db_uuid}.")
             raise PermissionError("无权删除此商品。")
@@ -212,21 +205,21 @@ class ProductService:
         Args:
             conn: 数据库连接对象
             product_id: 商品ID
-            current_user: 当前操作用户 (字典类型，包含 user_id, is_staff 等)
+            current_user: 当前操作用户 (字典类型，包含 用户ID, 是否管理员 等中文键名)
 
         Raises:
             NotFoundError: 商品未找到
             PermissionError: 无权限操作
             DatabaseError: 数据库操作失败
         """
-        logger.info(f"SERVICE: User {current_user.get('user_id')} attempting to withdraw product {product_id}")
+        logger.info(f"SERVICE: User {current_user.get('用户ID')} attempting to withdraw product {product_id}")
 
         existing_product = await self.product_dal.get_product_by_id(conn, product_id)
         if not existing_product:
             logger.warning(f"SERVICE: Product {product_id} not found for withdrawal.")
             raise NotFoundError(f"商品 (ID: {product_id}) 未找到。")
 
-        is_admin_request = current_user.get('is_staff', False)
+        is_admin_request = current_user.get('是否管理员', False) # 使用中文键
         owner_id_from_db = existing_product.get('卖家ID')
         
         try:
@@ -240,12 +233,11 @@ class ProductService:
             logger.error(f"SERVICE: Invalid OwnerID format '{owner_id_from_db}' for product {product_id} during withdraw.")
             raise PermissionError("无法验证商品所有权以下架商品。")
 
-        current_user_id = current_user.get('user_id')
+        current_user_id = current_user.get('用户ID') # 使用中文键
         if not is_admin_request and owner_id_from_db_uuid != current_user_id:
             logger.warning(f"SERVICE: User {current_user_id} (not owner or admin) attempted to withdraw product {product_id} owned by {owner_id_from_db_uuid}.")
             raise PermissionError("无权下架此商品。")
             
-        # 检查商品当前状态是否允许下架 (例如，不能下架已经售罄或已经被下架的商品)
         current_status = existing_product.get('商品状态')
         if current_status not in ['Active', 'PendingReview', 'Rejected']:
             logger.warning(f"SERVICE: Product {product_id} is in status '{current_status}' and cannot be withdrawn.")

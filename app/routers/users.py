@@ -27,7 +27,7 @@ from app.dependencies import (
     get_current_authenticated_user, # For active authenticated users
     get_current_super_admin_user # Added for super admin authentication
 )
-from app.exceptions import NotFoundError, IntegrityError, DALError, AuthenticationError, ForbiddenError # Import necessary exceptions
+from app.exceptions import NotFoundError, IntegrityError, DALError, AuthenticationError, ForbiddenError,  PermissionError # Import necessary exceptions
 
 # Import file upload utility
 from ..utils.file_upload import save_upload_file, UPLOAD_DIR # Import UPLOAD_DIR to construct the URL
@@ -236,15 +236,25 @@ async def get_all_users_api(
     current_admin_user: dict = Depends(get_current_active_admin_user) # Requires admin authentication
 ):
     """
-    管理员获取所有用户列表。
+    Retrieve all users. Only accessible by admin users.
     """
-    logger.debug(f"API /users (GET ALL): current_admin_user: {current_admin_user.get('用户ID')}") # Access with Chinese key
     try:
-        users = await user_service.get_all_users(conn, current_admin_user['用户ID'])
+        # Log the admin user dictionary to understand its structure
+        logger.debug(f"API /users (GET ALL): current_admin_user: {current_admin_user}")
+        if not current_admin_user or not current_admin_user.get("is_staff"):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权执行此操作")
+
+        # Correctly access the admin_id using the English key from the token
+        admin_id = current_admin_user.get('user_id')
+        if not admin_id:
+            logger.error("Admin user_id not found in token data.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无法识别管理员身份")
+
+        users = await user_service.get_all_users(conn, admin_id)
         return users
-    except ForbiddenError as e:
-        logger.warning(f"Forbidden access to get_all_users: {e}")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except HTTPException as e: # Re-raise HTTPExceptions to maintain status code and detail
+        logger.error(f"HTTPException in get_all_users_api: {e.detail}")
+        raise e
     except Exception as e:
         logger.error(f"Error in get_all_users_api: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取所有用户失败")
@@ -259,24 +269,32 @@ async def change_user_status_by_id(
     current_admin_user: dict = Depends(get_current_active_admin_user)
 ):
     """
-    管理员根据用户 ID 更改用户状态（禁用/启用）。
+    Change a user's status (Active/Disabled). Only accessible by admin users.
     """
     try:
-        admin_id = current_admin_user.get('用户ID') or current_admin_user.get('user_id')
+        logger.info(f"Attempting to change status for user {user_id} by admin {current_admin_user.get('user_id')}")
+        admin_id = current_admin_user.get('user_id') # Use English key 'user_id'
         if not admin_id:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="无法获取管理员用户信息")
-        
-        await user_service.change_user_status(conn, user_id, status_update_data.status, admin_id) # Pass admin_id directly
-        return {} # 204 No Content
-    except (ForbiddenError, DALError, AuthenticationError, NotFoundError) as e:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN if isinstance(e, ForbiddenError) else 
-                          (status.HTTP_401_UNAUTHORIZED if isinstance(e, AuthenticationError) else 
-                            (status.HTTP_404_NOT_FOUND if isinstance(e, NotFoundError) else status.HTTP_500_INTERNAL_SERVER_ERROR)),
-            detail=str(e)
-        )
+            logger.error(f"Admin ID not found in token for status change operation on user {user_id}")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="管理员身份未能识别")
+
+        success = await user_service.change_user_status(conn, user_id, status_update_data.status, admin_id)
+        if not success:
+            # This case might be redundant if service layer raises specific exceptions for failure
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="更新用户状态失败")
+        # No content returned on success, as per HTTP_204_NO_CONTENT
+    except NotFoundError as e:
+        logger.warning(f"NotFoundError in change_user_status_by_id for user {user_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e: # Specific error for permission issues from service
+        logger.warning(f"PermissionError in change_user_status_by_id for user {user_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e: # Catch potential ValueErrors, e.g. invalid status string
+        logger.warning(f"ValueError in change_user_status_by_id for user {user_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+        logger.error(f"Unexpected error changing status for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="更新用户状态时发生内部错误")
 
 # Super Admin endpoint to toggle user staff status
 @router.put("/{user_id}/toggle_staff", status_code=status.HTTP_204_NO_CONTENT)
@@ -287,24 +305,29 @@ async def toggle_user_staff_status(
     current_super_admin: dict = Depends(get_current_super_admin_user) # Requires super admin authentication
 ):
     """
-    超级管理员切换用户的管理员 (is_staff) 状态。
+    Toggle a user's staff status. Only accessible by super admin users.
     """
-    super_admin_id = current_super_admin['用户ID']  # Extract user_id from the dict
     try:
-        await user_service.toggle_user_staff_status(conn, user_id, super_admin_id)
-        return {} # 204 No Content
+        logger.info(f"Attempting to toggle staff status for user {user_id} by super_admin {current_super_admin.get('user_id')}")
+        super_admin_id = current_super_admin.get('user_id') # Use English key 'user_id'
+        if not super_admin_id:
+            logger.error(f"Super Admin ID not found in token for toggle_staff operation on user {user_id}")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="超级管理员身份未能识别")
+
+        success = await user_service.toggle_user_staff_status(conn, user_id, super_admin_id) # Pass UUID
+        if not success:
+            # This case might be redundant if service layer raises specific exceptions for failure
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="切换用户管理员状态失败")
+        # No content returned on success
     except NotFoundError as e:
-        logger.error(f"Error toggling staff status: {e}")
+        logger.warning(f"NotFoundError in toggle_user_staff_status for user {user_id}: {e}")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except PermissionError as e:
-        logger.error(f"Permission denied for toggling staff status for user {user_id}: {e}")
+        logger.warning(f"PermissionError in toggle_user_staff_status for user {user_id}: {e}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
-    except (ValueError, DALError) as e:
-        logger.error(f"Error toggling staff status for user {user_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"An unexpected error occurred while toggling staff status for user {user_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+        logger.error(f"Unexpected error toggling staff status for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="切换用户管理员状态时发生内部错误")
 
 # Admin endpoint to adjust user credit
 @router.put("/{user_id}/credit", status_code=status.HTTP_204_NO_CONTENT)
@@ -316,27 +339,35 @@ async def adjust_user_credit_by_id(
     current_admin_user: dict = Depends(get_current_active_admin_user)
 ):
     """
-    管理员根据用户 ID 调整用户信用分。
+    Adjust a user's credit score. Only accessible by admin users.
     """
     try:
-        admin_id = current_admin_user.get('用户ID') or current_admin_user.get('user_id')
+        logger.info(f"Attempting to adjust credit for user {user_id} by admin {current_admin_user.get('user_id')}")
+        admin_id = current_admin_user.get('user_id') # Use English key 'user_id'
         if not admin_id:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="无法获取管理员用户信息")
-            
-        await user_service.adjust_user_credit(conn, user_id, credit_adjustment_data.credit_adjustment, admin_id, credit_adjustment_data.reason) # Pass admin_id directly
-        return {} # 204 No Content
-    except (NotFoundError, ForbiddenError, DALError, AuthenticationError) as e:
-         raise HTTPException(
-             status_code=status.HTTP_404_NOT_FOUND if isinstance(e, NotFoundError) else 
-                           (status.HTTP_403_FORBIDDEN if isinstance(e, ForbiddenError) else 
-                            (status.HTTP_401_UNAUTHORIZED if isinstance(e, AuthenticationError) else status.HTTP_500_INTERNAL_SERVER_ERROR)),
-             detail=str(e)
-         )
-    except ValueError as e:
-        # Catch ValueError from Service layer (e.g., invalid status, credit limit, missing reason)
+            logger.error(f"Admin ID not found in token for credit adjustment operation on user {user_id}")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="管理员身份未能识别")
+
+        success = await user_service.adjust_user_credit(
+            conn,
+            user_id,
+            credit_adjustment_data.credit_adjustment,
+            admin_id, # Pass UUID
+            credit_adjustment_data.reason
+        )
+        if not success:
+            # This case might be redundant if service layer raises specific exceptions for failure
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="调整用户信用分失败")
+        # No content returned on success
+    except NotFoundError as e:
+        logger.warning(f"NotFoundError in adjust_user_credit_by_id for user {user_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        logger.warning(f"PermissionError in adjust_user_credit_by_id for user {user_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e: # Catch potential ValueErrors from Pydantic model or service layer
+        logger.warning(f"ValueError in adjust_user_credit_by_id for user {user_id}: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except DALError as e:
-        # Catch DAL errors that were not specifically handled before
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+        logger.error(f"Unexpected error adjusting credit for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="调整用户信用分时发生内部错误")
