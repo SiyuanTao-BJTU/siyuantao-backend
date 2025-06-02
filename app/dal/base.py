@@ -36,45 +36,44 @@ async def execute_query(
         None if fetchone is True and no row is found.
     """
     loop = asyncio.get_event_loop()
-    cursor = None # Initialize cursor to None
-    try:
-        # Get cursor from the connection
-        # Since conn is now a direct pyodbc.Connection, conn.cursor() is synchronous.
-        # We run it in an executor to avoid blocking the event loop.
-        cursor = await loop.run_in_executor(None, conn.cursor)
-        
-        logger.debug(f"Executing SQL: {sql[:200]}... with params: {params}")
-        if params:
-            await loop.run_in_executor(None, cursor.execute, sql, params)
-        else:
-            await loop.run_in_executor(None, cursor.execute, sql)
+    cursor = await loop.run_in_executor(None, conn.cursor)
 
+    # Convert UUID objects in params to their string representation
+    # and ensure they are properly cast/converted in the SQL if needed.
+    # This assumes that SQL Server's UNIQUEIDENTIFIER will accept string literals.
+    # For the `?` placeholder, pyodbc should handle the string conversion correctly.
+    processed_params = []
+    if params:
+        for p in params:
+            if isinstance(p, UUID):
+                processed_params.append(str(p))  # Convert UUID to string
+            else:
+                processed_params.append(p)
+    
+    # log_params = ", ".join([f"{p} (Type: {type(p)})" for p in processed_params])
+    # logger.debug(f"Executing SQL: {sql}... with params: ({log_params})")
+    logger.debug(f"Executing SQL: {sql}... with params: {processed_params}")
+
+    try:
+        await loop.run_in_executor(None, cursor.execute, sql, tuple(processed_params))
+        
         if fetchone:
             row = await loop.run_in_executor(None, cursor.fetchone)
-            if row:
-                # Convert row to dictionary (column names as keys)
-                columns = [column[0] for column in cursor.description]
-                return dict(zip(columns, row))
-            return None # No row found
+            return dict(zip([column[0] for column in cursor.description], row)) if row else None
         elif fetchall:
             rows = await loop.run_in_executor(None, cursor.fetchall)
             columns = [column[0] for column in cursor.description]
-            return [dict(zip(columns, r)) for r in rows]
-        else:
-            # For INSERT, UPDATE, DELETE, or SELECT where only rowcount is needed
-            # cursor.rowcount is available after execute
-            return cursor.rowcount
-            
-    except pyodbc.Error as e:
-        logger.error(f"DAL execute_query error: {e} (SQL: {sql[:200]}..., Params: {params})", exc_info=True)
-        # Re-raise the original pyodbc.Error to be handled by the transaction manager or higher-level error handlers
-        raise
+            return [dict(zip(columns, row)) for row in rows]
+        else: # For non-query operations, return rowcount (handled by execute_non_query mostly)
+            return await loop.run_in_executor(None, lambda: cursor.rowcount)
+    except pyodbc.ProgrammingError as e:
+        logger.error(f"DAL execute_query error: {e} (SQL: {sql}..., Params: {processed_params})")
+        raise map_db_exception(e) from e
     except Exception as e:
-        logger.error(f"DAL execute_query unexpected error: {e} (SQL: {sql[:200]}..., Params: {params})", exc_info=True)
-        raise # Re-raise other unexpected errors
+        logger.error(f"An unexpected error occurred during DAL execute_query: {e}", exc_info=True)
+        raise DatabaseError(f"An unexpected database error occurred: {e}") from e
     finally:
-        if cursor:
-            await loop.run_in_executor(None, cursor.close)
+        await loop.run_in_executor(None, cursor.close)
 
 async def execute_non_query(conn: pyodbc.Connection, sql: str, params: tuple = ()) -> int:
     """
@@ -89,29 +88,30 @@ async def execute_non_query(conn: pyodbc.Connection, sql: str, params: tuple = (
         The number of rows affected.
     """
     loop = asyncio.get_event_loop()
-    cursor = None # Initialize cursor to None
-    try:
-        cursor = await loop.run_in_executor(None, conn.cursor)
-        logger.debug(f"Executing Non-Query SQL: {sql[:200]}... with params: {params}")
-        if params:
-            await loop.run_in_executor(None, cursor.execute, sql, params)
-        else:
-            await loop.run_in_executor(None, cursor.execute, sql)
-        
-        # For non-query statements, rowcount gives the number of affected rows
-        row_count = cursor.rowcount
-        # No commit here, transaction is handled by the transaction context manager in get_db_connection
-        return row_count
+    cursor = await loop.run_in_executor(None, conn.cursor)
 
-    except pyodbc.Error as e:
-        logger.error(f"DAL execute_non_query error: {e} (SQL: {sql[:200]}..., Params: {params})", exc_info=True)
-        raise # Re-raise to be handled by transaction manager or higher level
+    processed_params = []
+    if params:
+        for p in params:
+            if isinstance(p, UUID):
+                processed_params.append(str(p)) # Convert UUID to string
+            else:
+                processed_params.append(p)
+    
+    logger.debug(f"Executing SQL (non-query): {sql}... with params: {processed_params}")
+
+    try:
+        await loop.run_in_executor(None, cursor.execute, sql, tuple(processed_params))
+        rowcount = await loop.run_in_executor(None, lambda: cursor.rowcount)
+        return rowcount
+    except pyodbc.ProgrammingError as e:
+        logger.error(f"DAL execute_non_query error: {e} (SQL: {sql}..., Params: {processed_params})")
+        raise map_db_exception(e) from e
     except Exception as e:
-        logger.error(f"DAL execute_non_query unexpected error: {e} (SQL: {sql[:200]}..., Params: {params})", exc_info=True)
-        raise
+        logger.error(f"An unexpected error occurred during DAL execute_non_query: {e}", exc_info=True)
+        raise DatabaseError(f"An unexpected database error occurred: {e}") from e
     finally:
-        if cursor:
-            await loop.run_in_executor(None, cursor.close)
+        await loop.run_in_executor(None, cursor.close)
 
 # Removed the transaction context manager from base.py as it's now in connection.py
 # @asynccontextmanager
