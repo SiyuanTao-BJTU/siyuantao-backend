@@ -254,6 +254,26 @@ class OrderService:
         except Exception as e:
             raise DALError(f"An unexpected error occurred updating order status for order {order_id}: {e}") from e
 
+
+    async def get_all_orders_for_admin(
+        self,
+        conn: pyodbc.Connection,
+        status: Optional[str] = None,
+        page_number: int = 1,
+        page_size: int = 10
+    ) -> List[OrderResponseSchema]:
+        """
+        Retrieves a list of all orders for administrative purposes, with optional status filtering and pagination.
+        """
+        try:
+            orders_data = await self.order_dal.get_all_orders(conn, status, page_number, page_size)
+            # 将 DAL 返回的字典列表转换为 OrderResponseSchema 列表
+            return [OrderResponseSchema(**order_data) for order_data in orders_data]
+        except DALError as e:
+            raise DALError(f"获取所有订单失败: {e}") from e
+        except Exception as e:
+            raise DALError(f"获取所有订单时发生意外错误: {e}") from e
+
 # Note: 
 # 1. Pydantic Schemas (OrderCreateSchema, OrderResponseSchema, etc.) need to be defined in `app.schemas.order_schemas.py`.
 # 2. OrderDAL needs to be implemented in `app.dal.order_dal.py` with methods like `create_order`, `confirm_order`, etc., that call the respective stored procedures.

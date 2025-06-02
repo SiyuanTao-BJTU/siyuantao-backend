@@ -267,12 +267,16 @@ BEGIN
                O.CreateTime AS 创建时间, 
                O.UpdateTime AS 更新时间,
                O.CompleteTime AS 完成时间, 
-               O.CancelTime AS 取消时间, 
+               O.CancelTime AS 取消时间,
+               O.BuyerID AS 买家ID,
+               UB.UserName AS 买家用户名,
                O.SellerID AS 卖家ID, 
                US.UserName AS 卖家用户名
         FROM [Order] O
         JOIN [Product] P ON O.ProductID = P.ProductID
         JOIN [User] US ON O.SellerID = US.UserID
+        JOIN [User] UB ON O.BuyerID = UB.UserID
+        LEFT JOIN [Evaluation] E ON O.OrderID = E.OrderID 
         WHERE O.BuyerID = @InnerUserID' + @WhereClause + N'
         ORDER BY O.CreateTime DESC
         OFFSET @InnerOffset ROWS FETCH NEXT @InnerPageSize ROWS ONLY;';
@@ -292,10 +296,14 @@ BEGIN
                O.CompleteTime AS 完成时间, 
                O.CancelTime AS 取消时间, 
                O.BuyerID AS 买家ID, 
-               UB.UserName AS 买家用户名
+               UB.UserName AS 买家用户名,
+               O.SellerID AS 卖家ID,
+               US.UserName AS 卖家用户名
         FROM [Order] O
         JOIN [Product] P ON O.ProductID = P.ProductID
         JOIN [User] UB ON O.BuyerID = UB.UserID
+        JOIN [User] US ON O.SellerID = US.UserID
+        LEFT JOIN [Evaluation] E ON O.OrderID = E.OrderID
         WHERE O.SellerID = @InnerUserID' + @WhereClause + N'
         ORDER BY O.CreateTime DESC
         OFFSET @InnerOffset ROWS FETCH NEXT @InnerPageSize ROWS ONLY;';
@@ -352,5 +360,63 @@ BEGIN
     JOIN [User] US ON O.SellerID = US.UserID
     JOIN [User] UB ON O.BuyerID = UB.UserID
     WHERE O.OrderID = @OrderID;
+END;
+GO
+
+-- sp_GetAllOrders: 获取所有订单列表 (管理员视图)
+-- 功能: 获取所有订单的列表，可根据状态筛选和分页
+DROP PROCEDURE IF EXISTS [sp_GetAllOrders];
+GO
+CREATE PROCEDURE [sp_GetAllOrders]
+    @StatusFilter NVARCHAR(50) = NULL, -- 状态筛选参数
+    @PageNumber INT = 1,               -- 页码参数
+    @PageSize INT = 10                 -- 每页大小参数
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @Sql NVARCHAR(MAX);
+    DECLARE @Params NVARCHAR(MAX);
+    DECLARE @WhereClause NVARCHAR(MAX) = N'';
+
+    IF @StatusFilter IS NOT NULL AND @StatusFilter <> ''
+    BEGIN
+        SET @WhereClause = @WhereClause + N' WHERE O.Status = @InnerStatusFilter';
+    END
+
+    SET @Sql = N'
+    SELECT O.OrderID AS 订单ID, 
+           O.ProductID AS 商品ID, 
+           P.ProductName AS 商品名称, 
+           O.Quantity AS 数量, 
+           O.TradeTime AS 交易时间,
+           O.TradeLocation AS 交易地点,
+           O.Status AS 订单状态, 
+           O.CreateTime AS 创建时间, 
+           O.UpdateTime AS 更新时间,
+           O.CompleteTime AS 完成时间, 
+           O.CancelTime AS 取消时间, 
+           O.BuyerID AS 买家ID, 
+           UB.UserName AS 买家用户名,
+           O.SellerID AS 卖家ID,
+           US.UserName AS 卖家用户名,
+           CASE WHEN E.EvaluationID IS NOT NULL THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS 是否已评价
+    FROM [Order] O
+    JOIN [Product] P ON O.ProductID = P.ProductID
+    JOIN [User] UB ON O.BuyerID = UB.UserID
+    JOIN [User] US ON O.SellerID = US.UserID
+    LEFT JOIN [Evaluation] E ON O.OrderID = E.OrderID' + @WhereClause + N'
+    ORDER BY O.CreateTime DESC
+    OFFSET @InnerOffset ROWS FETCH NEXT @InnerPageSize ROWS ONLY;';
+
+    SET @Params = N'@InnerStatusFilter NVARCHAR(50), @InnerOffset INT, @InnerPageSize INT';
+
+    -- 计算 OFFSET 值
+    DECLARE @Offset INT = (@PageNumber - 1) * @PageSize;
+
+    EXEC sp_executesql @Sql, @Params, 
+                       @InnerStatusFilter = @StatusFilter, 
+                       @InnerOffset = @Offset, 
+                       @InnerPageSize = @PageSize;
 END;
 GO

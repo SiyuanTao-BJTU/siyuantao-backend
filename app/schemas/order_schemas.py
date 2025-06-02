@@ -43,6 +43,7 @@ class OrderResponseSchema(BaseModel):
     商品名称: Optional[str] = Field(None, alias="product_name", description="Name of the product ordered")
     卖家用户名: Optional[str] = Field(None, alias="seller_username", description="Username of the seller")
     买家用户名: Optional[str] = Field(None, alias="buyer_username", description="Username of the buyer")
+    是否已评价: Optional[bool] = Field(None, alias="has_evaluated", description="是否已评价")
 
     class Config:
         orm_mode = True

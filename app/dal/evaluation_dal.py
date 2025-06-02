@@ -101,26 +101,57 @@ class EvaluationDAL:
         except Exception as e:
             raise DALError(f"获取买家评价时发生意外错误: {e}") from e
 
-# Example of how this DAL might be used (typically in a Service layer):
-# async def example_usage(db_conn_provider, order_id, buyer_id, rating, comment):
-#     async with db_conn_provider as conn:
-#         # Assuming execute_query_func is somehow available or conn itself is used directly
-#         # For this example, we'll assume the DAL is instantiated with a function that uses the conn
-#         async def _execute_query(sql_query, sql_params):
-#             async with conn.cursor() as cursor:
-#                 await cursor.execute(sql_query, *sql_params)
-#                 # Adapt based on whether results are expected or not
-#                 try:
-#                     return await cursor.fetchall()
-#                 except pyodbc.ProgrammingError: # No results
-#                     return None
+    async def get_all_evaluations(
+        self,
+        conn: pyodbc.Connection,
+        product_id: Optional[UUID] = None,
+        seller_id: Optional[UUID] = None,
+        buyer_id: Optional[UUID] = None,
+        min_rating: Optional[int] = None,
+        max_rating: Optional[int] = None,
+        page_number: int = 1,
+        page_size: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetches all evaluations, with optional filters and pagination, for admin view.
+        Calls a stored procedure like sp_GetAllEvaluations.
+        """
+        sql = "{CALL sp_GetAllEvaluations (?, ?, ?, ?, ?, ?, ?)}"
+        params = (
+            str(product_id) if product_id else None,
+            str(seller_id) if seller_id else None,
+            str(buyer_id) if buyer_id else None,
+            min_rating,
+            max_rating,
+            page_number,
+            page_size
+        )
+        try:
+            results = await self._execute_query(conn, sql, params, fetchall=True)
+            return results
+        except pyodbc.Error as e:
+            error_msg = str(e)
+            raise DALError(f"获取所有评价失败: {error_msg}") from e
+        except Exception as e:
+            raise DALError(f"获取所有评价时发生意外错误: {e}") from e
 
-#         evaluation_dal = EvaluationDAL(execute_query_func=_execute_query) # Simplified for example
-#         # Or, more directly if the DAL method uses conn directly:
-#         # evaluation_dal = EvaluationDAL(None) # If execute_query_func is not used by the method
-
-#         try:
-#             await evaluation_dal.create_evaluation(conn, order_id, buyer_id, rating, comment)
-#             print(f"Evaluation created successfully for order {order_id}.")
-#         except DALError as e:
-#             print(f"Failed to create evaluation: {e}")
+    async def delete_evaluation(
+        self,
+        conn: pyodbc.Connection,
+        evaluation_id: UUID
+    ) -> None:
+        """
+        Deletes an evaluation by its ID. Typically used by admin.
+        Calls a stored procedure like sp_DeleteEvaluation.
+        """
+        sql = "{CALL sp_DeleteEvaluation (?)}"
+        params = (str(evaluation_id),)
+        try:
+            await self._execute_query(conn, sql, params, fetchone=False) # Non-query execution
+        except pyodbc.Error as e:
+            error_msg = str(e)
+            if "50001" in error_msg: # Assuming specific error code for not found/permission
+                raise NotFoundError(f"删除评价失败: {error_msg}") from e
+            raise DALError(f"删除评价异常: {error_msg}") from e
+        except Exception as e:
+            raise DALError(f"删除评价时发生意外错误: {e}") from e

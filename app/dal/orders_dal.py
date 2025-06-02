@@ -234,3 +234,28 @@ class OrdersDAL:
             raise DALError(f"无法获取订单 {order_id}: {error_msg}") from e
         except Exception as e:
             raise DALError(f"获取订单 {order_id} 时发生意外错误: {e}") from e
+        
+
+    async def get_all_orders(
+        self,
+        conn: pyodbc.Connection,
+        status: Optional[str] = None,
+        page_number: int = 1,
+        page_size: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Calls sp_GetAllOrders (或类似名称) to retrieve a list of all orders for admin view.
+        Supports status filtering and pagination.
+        """
+        sql = "{CALL sp_GetAllOrders (?, ?, ?)}" # Stored procedure for getting all orders
+        params = (status, page_number, page_size)
+        try:
+            orders = await self._execute_query(conn, sql, params, fetchall=True)
+            return orders
+        except DALError as e:
+            raise DALError(f"无法获取所有订单: {e}") from e
+        except pyodbc.Error as e:
+            error_msg = str(e)
+            raise DALError(f"数据库错误，无法获取所有订单: {error_msg}") from e
+        except Exception as e:
+            raise DALError(f"获取所有订单时发生意外错误: {e}") from e

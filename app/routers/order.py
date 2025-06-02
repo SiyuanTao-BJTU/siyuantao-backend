@@ -8,7 +8,7 @@ import fastapi
 from app.schemas.order_schemas import OrderCreateSchema, OrderResponseSchema, OrderStatusUpdateSchema 
 # 假设的Service和依赖路径，请根据您的项目结构调整
 from app.services.order_service import OrderService
-from app.dependencies import get_current_authenticated_user, get_db_connection, get_order_service
+from app.dependencies import get_current_authenticated_user, get_db_connection, get_order_service, get_current_active_admin_user 
 
 # 假设的异常类路径，请根据您的项目结构调整
 from app.exceptions import IntegrityError, ForbiddenError, NotFoundError, DALError
@@ -96,7 +96,8 @@ async def get_my_orders(
     order_service: OrderService = Depends(get_order_service),
     status: str = Query(None), # 添加status查询参数
     page_number: int = Query(1, ge=1), # 添加page_number查询参数
-    page_size: int = Query(10, ge=1, le=100) # 添加page_size查询参数
+    page_size: int = Query(10, ge=1, le=100), # 添加page_size查询参数
+    is_seller: bool = Query(False) # 新增 is_seller 查询参数，默认为 False (获取买家订单)
 ):
     """
     获取当前登录用户的所有订单列表 (作为买家或卖家)。
@@ -108,8 +109,8 @@ async def get_my_orders(
 
     try:
         user_id = user_id_str # 直接使用 UUID 对象
-        # 假设这里 is_seller 默认为 False，如果需要获取卖家订单，可能需要另一个路由或额外的查询参数
-        orders = await order_service.get_orders_by_user(conn, user_id, is_seller=False, status=status, page_number=page_number, page_size=page_size)
+        # 使用传入的 is_seller 参数
+        orders = await order_service.get_orders_by_user(conn, user_id, is_seller=is_seller, status=status, page_number=page_number, page_size=page_size)
         return orders
     except NotFoundError as e: # 虽然通常返回空列表，但以防service层抛出
         raise HTTPException(status_code=fastapi.status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -117,7 +118,7 @@ async def get_my_orders(
         raise HTTPException(status_code=fastapi.status.HTTP_500_INTERNAL_SERVER_ERROR, detail=e.detail if e.detail else str(e))
     except Exception as e:
         raise HTTPException(status_code=fastapi.status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
-
+    
 @router.get("/{order_id}", response_model=OrderResponseSchema, response_model_by_alias=False)
 async def get_order_by_id_route(
     order_id: uuid.UUID = Path(..., title="The ID of the order to retrieve"),
@@ -321,6 +322,33 @@ async def reject_order_route(
         raise HTTPException(status_code=fastapi.status.HTTP_403_FORBIDDEN, detail=str(e))
     except NotFoundError as e:
         raise HTTPException(status_code=fastapi.status.HTTP_404_NOT_FOUND, detail=str(e))
+    except DALError as e:
+        raise HTTPException(status_code=fastapi.status.HTTP_500_INTERNAL_SERVER_ERROR, detail=e.detail if e.detail else str(e))
+    except Exception as e:
+        raise HTTPException(status_code=fastapi.status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+
+
+@router.get("/admin/orders", response_model=List[OrderResponseSchema], response_model_by_alias=False)
+async def get_all_orders_for_admin_route(
+    conn: pyodbc.Connection = Depends(get_db_connection),
+    order_service: OrderService = Depends(get_order_service),
+    admin_user: dict = Depends(get_current_active_admin_user), # 使用管理员认证依赖
+    status: str = Query(None), # 添加status查询参数
+    page_number: int = Query(1, ge=1), # 添加page_number查询参数
+    page_size: int = Query(10, ge=1, le=100) # 添加page_size查询参数
+):
+    """
+    获取所有订单列表 (管理员视图)。
+    对应存储过程: `sp_GetAllOrders` (通过Service层调用)
+    """
+    # 无需 user_id_str 检查，因为 admin_user 依赖已经确保是管理员
+    try:
+        orders = await order_service.get_all_orders_for_admin(conn, status=status, page_number=page_number, page_size=page_size)
+        return orders
+    except NotFoundError as e: 
+        raise HTTPException(status_code=fastapi.status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ForbiddenError as e: # 权限不足
+        raise HTTPException(status_code=fastapi.status.HTTP_403_FORBIDDEN, detail=str(e))
     except DALError as e:
         raise HTTPException(status_code=fastapi.status.HTTP_500_INTERNAL_SERVER_ERROR, detail=e.detail if e.detail else str(e))
     except Exception as e:
