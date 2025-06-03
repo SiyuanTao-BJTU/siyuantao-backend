@@ -165,37 +165,37 @@ class ProductDAL:
             logger.error(f"Unexpected Error deleting product {product_id}: {e}")
             raise e
 
-    async def activate_product(self, conn: pyodbc.Connection, product_id: UUID, admin_id: UUID) -> None:
+    async def activate_product(self, conn: pyodbc.Connection, product_id: UUID, operator_id: UUID, is_admin_request: bool) -> None:
         """
-        管理员审核通过商品，将商品状态设为Active
+        激活商品。可以是管理员审核通过商品（设为Active），也可以是卖家重新上架已下架商品。
         
         Args:
             conn: 数据库连接对象
             product_id: 商品ID (UUID)
-            admin_id: 管理员ID (UUID)
+            operator_id: 操作者ID (可以是管理员或商品所有者) (UUID)
+            is_admin_request: 标记是否由管理员发起此操作 (布尔值)
         
         Raises:
-            DatabaseError: 数据库操作失败时抛出
-            PermissionError: 非管理员尝试操作时抛出
+            DALError: 数据库操作失败时抛出
         """
-        sql = "{CALL sp_ActivateProduct(?, ?)}"
+        sql = "{CALL sp_ActivateProduct(?, ?, ?)}" # 修改为3个参数
         params = (
             product_id, # Passed as UUID
-            admin_id # Passed as UUID
+            operator_id, # 新增：操作者ID
+            is_admin_request # 新增：是否管理员请求
         )
         try:
             rowcount = await self._execute_query(conn, sql, params, fetchone=False, fetchall=False)
             if rowcount == 0: # This might indicate product not found or no permission etc.
-                logger.warning(f"DAL: Activate product {product_id} returned 0 rows affected. Admin {admin_id}.")
+                logger.warning(f"DAL: Activate product {product_id} returned 0 rows affected. Operator {operator_id} (Admin: {is_admin_request}).")
                 # The SP should ideally return specific codes/messages for not found/permission denied.
-                # Assuming 0 rows affected indicates failure for the given product_id/admin_id combo.
-                # For now, rely on service layer to check permissions and product existence prior.
-                raise DALError(f"Failed to activate product {product_id}. Check product ID and admin permissions.")
+                # Assuming 0 rows affected indicates failure for the given product_id/operator_id/is_admin_request combo.
+                raise DALError(f"Failed to activate product {product_id}. Check product ID, permissions, and status.")
         except pyodbc.Error as e:
-            logger.error(f"DAL Error activating product {product_id}: {e}")
+            logger.error(f"DAL Error activating product {product_id} by operator {operator_id} (Admin: {is_admin_request}): {e}")
             raise DALError(f"Database error activating product {product_id}: {e}") from e
         except Exception as e:
-            logger.error(f"Unexpected Error activating product {product_id}: {e}")
+            logger.error(f"Unexpected Error activating product {product_id} by operator {operator_id} (Admin: {is_admin_request}): {e}")
             raise e
 
     async def reject_product(self, conn: pyodbc.Connection, product_id: UUID, admin_id: UUID, reason: Optional[str] = None) -> None:
@@ -461,6 +461,31 @@ class ProductDAL:
             raise DALError(f"Database error batch rejecting products: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected Error batch rejecting products: {e}")
+            raise e
+
+    async def update_product_status(self, conn: pyodbc.Connection, product_id: UUID, new_status: str, audit_reason: Optional[str] = None) -> None:
+        """
+        更新商品状态。
+        
+        Args:
+            conn: 数据库连接对象
+            product_id: 商品ID (UUID)
+            new_status: 新的商品状态 (例如: 'Active', 'PendingReview', 'Rejected', 'Sold', 'Withdrawn')
+            audit_reason: 审核原因 (仅当状态为 'Rejected' 时需要)
+        
+        Raises:
+            DALError: 数据库操作失败时抛出
+        """
+        sql = "{CALL sp_UpdateProductStatus(?, ?, ?)}"
+        params = (product_id, new_status, audit_reason)
+        try:
+            await self._execute_query(conn, sql, params, fetchone=False)
+            logger.info(f"DAL: Product {product_id} status updated to {new_status}.")
+        except pyodbc.Error as e:
+            logger.error(f"DAL Error updating product {product_id} status to {new_status}: {e}")
+            raise DALError(f"Database error updating product status: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected Error updating product {product_id} status to {new_status}: {e}")
             raise e
 
 

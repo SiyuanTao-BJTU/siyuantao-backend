@@ -357,18 +357,18 @@ async def get_product_detail(product_id: UUID,
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
 @router.put("/{product_id}/status/activate", response_model_by_alias=False)
-async def activate_product(product_id: UUID, admin: dict = Depends(get_current_active_admin_user), # Changed type hint to dict
+async def activate_product(product_id: UUID, 
+                            current_user: dict = Depends(get_current_authenticated_user), # 更改依赖为 get_current_authenticated_user
                             product_service: ProductService = Depends(get_product_service),
                             conn: pyodbc.Connection = Depends(get_db_connection)):
     """
-    Activate a product by an admin.
+    Activate a product by an admin or owner.
     - **product_id**: UUID of the product to activate.
-    - **admin**: Admin user performing the action.
+    - **current_user**: Authenticated user performing the action.
     """
     try:
-        logger.info(f"Router: Activating product {product_id} by admin {admin.get('user_id')}") # Use .get for safer access
-        admin_id = admin["user_id"] # Use English key
-        await product_service.activate_product(conn, product_id, admin_id) # Pass admin_id (UUID)
+        logger.info(f"Router: Activating product {product_id} by user {current_user.get('用户ID')}") 
+        await product_service.activate_product(conn, product_id, current_user) # 传递 current_user 对象
         return {"message": "商品激活成功"}
     except HTTPException as e:
         logger.error(f"HTTPException in activate_product: {e.detail}")

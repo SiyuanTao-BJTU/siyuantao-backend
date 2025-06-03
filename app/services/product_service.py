@@ -99,6 +99,54 @@ class ProductService:
             logger.warning(f"SERVICE: User {current_user_id} (not owner or admin) attempted to update product {product_id} owned by {owner_id_from_db_uuid}.")
             raise PermissionError("无权修改此商品。")
 
+        should_re_review = False
+        current_status = existing_product.get('商品状态')
+
+        # 只有在商品当前状态为 'Active' 或 'Withdrawn' 且不是管理员请求时才触发重新审核
+        if not is_admin_request and current_status in ['Active', 'Withdrawn']:
+            # 定义关键信息字段（与 ProductResponseSchema 中的中文键对应）
+            critical_fields = {
+                'product_name': '商品名称',
+                'description': '描述',
+                'price': '价格',
+                'category_name': '分类名称',
+                'condition': '成色'
+            }
+
+            # 比较关键信息是否发生变化
+            for new_field, old_field_chinese in critical_fields.items():
+                new_value = getattr(product_update_data, new_field, None)
+                old_value = existing_product.get(old_field_chinese)
+
+                # 对于浮点数，转换为字符串进行比较，避免精度问题
+                if isinstance(new_value, float) and isinstance(old_value, (float, int)):
+                    new_value_str = f"{new_value:.2f}"
+                    old_value_str = f"{float(old_value):.2f}"
+                    if new_value_str != old_value_str:
+                        logger.info(f"SERVICE: Critical field '{old_field_chinese}' changed from '{old_value_str}' to '{new_value_str}'. Re-review required.")
+                        should_re_review = True
+                        break
+                elif new_value is not None and str(new_value) != str(old_value) and old_value is not None: # 只有新值非空且与旧值不同时才算改变
+                    logger.info(f"SERVICE: Critical field '{old_field_chinese}' changed from '{old_value}' to '{new_value}'. Re-review required.")
+                    should_re_review = True
+                    break
+                elif new_value is not None and old_value is None: # 旧值为None，新值非None
+                    logger.info(f"SERVICE: Critical field '{old_field_chinese}' changed from 'None' to '{new_value}'. Re-review required.")
+                    should_re_review = True
+                    break
+
+            # 检查图片URL列表是否发生变化
+            if product_update_data.image_urls is not None:
+                existing_image_urls_str = existing_product.get('图片URL列表')
+                # 将逗号分隔的字符串转换为列表，并去除空格
+                existing_image_urls_list = [url.strip() for url in existing_image_urls_str.split(',')] if existing_image_urls_str else []
+                new_image_urls_list = [url.strip() for url in product_update_data.image_urls]
+
+                # 比较排序后的列表，忽略顺序差异
+                if sorted(existing_image_urls_list) != sorted(new_image_urls_list):
+                    logger.info("SERVICE: Image URLs changed. Re-review required.")
+                    should_re_review = True
+
         if product_update_data.image_urls is not None:
             logger.info(f"SERVICE: Updating images for product {product_id}. New URLs: {product_update_data.image_urls}")
             await self.product_image_dal.delete_product_images_by_product_id(conn, product_id)
@@ -120,6 +168,11 @@ class ProductService:
             is_admin_request=is_admin_request
         )
         logger.info(f"SERVICE: Product {product_id} updated successfully by user {current_user_id} (Admin: {is_admin_request}).")
+
+        # 如果关键信息被修改，并且是非管理员操作，则将商品状态重置为 PendingReview
+        if should_re_review:
+            logger.info(f"SERVICE: Critical information changed for product {product_id} by non-admin. Setting status to PendingReview.")
+            await self.product_dal.update_product_status(conn, product_id, 'PendingReview')
 
     async def delete_product(self, conn: pyodbc.Connection, product_id: UUID, current_user: dict) -> None:
         """
@@ -164,14 +217,17 @@ class ProductService:
         await self.product_dal.delete_product(conn, product_id, current_user_id, is_admin_request)
         logger.info(f"SERVICE: Product {product_id} deleted successfully by user {current_user_id} (Admin: {is_admin_request}).")
 
-    async def activate_product(self, conn: pyodbc.Connection, product_id: UUID, admin_id: UUID) -> None:
+    async def activate_product(self, conn: pyodbc.Connection, product_id: UUID, current_user: dict) -> None:
         # 路由层已经处理了管理员权限验证，服务层不需要重复此检查。
         # if not await self.check_admin_permission(conn, admin_id): # 传入UUID
         #     raise PermissionError("无权执行此操作，只有管理员可以激活商品。")
-        
+
+        is_admin_request = current_user.get('是否管理员', False) # 获取是否管理员状态
+        operator_id = current_user.get('用户ID') # 获取操作者ID
+
         try:
-            await self.product_dal.activate_product(conn, product_id, admin_id)
-            logger.info(f"Product {product_id} activated by admin {admin_id}")
+            await self.product_dal.activate_product(conn, product_id, operator_id, is_admin_request)
+            logger.info(f"Product {product_id} activated by user {operator_id} (Admin: {is_admin_request})")
         except NotFoundError:
             raise
         except DALError as e:

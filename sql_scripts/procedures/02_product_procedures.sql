@@ -856,54 +856,78 @@ BEGIN
 END;
 GO
 
--- sp_ActivateProduct: 管理员激活商品
--- 输入: @productId UNIQUEIDENTIFIER, @adminId UNIQUEIDENTIFIER
+-- sp_ActivateProduct: 激活商品（管理员审核通过或卖家重新上架）
 DROP PROCEDURE IF EXISTS [sp_ActivateProduct];
 GO
 CREATE PROCEDURE [sp_ActivateProduct]
-    @productId UNIQUEIDENTIFIER,
-    @adminId UNIQUEIDENTIFIER
+    @ProductID UNIQUEIDENTIFIER,
+    @OperatorID UNIQUEIDENTIFIER, -- 操作者ID (可以是管理员或商品所有者)
+    @IsAdminRequest BIT = 0        -- 标记是否由管理员发起此操作
 AS
 BEGIN
     SET NOCOUNT ON;
-    SET XACT_ABORT ON;
+    DECLARE @ErrorMessage NVARCHAR(4000);
+    DECLARE @ProductOwnerID UNIQUEIDENTIFIER;
+    DECLARE @CurrentStatus NVARCHAR(50);
 
-    -- 检查商品是否存在
-    IF NOT EXISTS (SELECT 1 FROM [Product] WHERE ProductID = @productId)
+    -- 检查商品是否存在并获取当前所有者和状态
+    SELECT @ProductOwnerID = OwnerID, @CurrentStatus = Status
+    FROM [Product]
+    WHERE ProductID = @ProductID;
+
+    IF @ProductOwnerID IS NULL
     BEGIN
-        RAISERROR('商品不存在。', 16, 1);
-        RETURN;
+        SET @ErrorMessage = '商品不存在。';
+        THROW 50000, @ErrorMessage, 1;
     END
 
-    -- 检查是否已是Active状态
-    IF (SELECT Status FROM [Product] WHERE ProductID = @productId) = 'Active'
+    -- 管理员操作逻辑
+    IF @IsAdminRequest = 1
     BEGIN
-        RAISERROR('商品已是上架状态，无需重复操作。', 16, 1);
-        RETURN;
+        -- 验证操作者是否为管理员
+        IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @OperatorID AND (IsStaff = 1 OR IsSuperAdmin = 1))
+        BEGIN
+            SET @ErrorMessage = '只有管理员才能执行此激活操作。';
+            THROW 50001, @ErrorMessage, 1;
+        END
+
+        -- 只有处于 'PendingReview' 或 'Withdrawn' 状态的商品才能被管理员激活
+        IF @CurrentStatus NOT IN ('PendingReview', 'Withdrawn')
+        BEGIN
+            SET @ErrorMessage = '管理员无法激活当前状态为 "' + @CurrentStatus + '" 的商品。';
+            THROW 50002, @ErrorMessage, 1;
+        END
+    END
+    -- 卖家操作逻辑 (重新上架)
+    ELSE
+    BEGIN
+        -- 验证操作者是否为商品所有者
+        IF @ProductOwnerID != @OperatorID
+        BEGIN
+            SET @ErrorMessage = '您无权上架此商品。';
+            THROW 50003, @ErrorMessage, 1;
+        END
+
+        -- 只有处于 'Withdrawn' 状态的商品才能被卖家重新上架
+        IF @CurrentStatus != 'Withdrawn'
+        BEGIN
+            SET @ErrorMessage = '只有已下架的商品才能由卖家重新上架。当前商品状态为 "' + @CurrentStatus + '"。';
+            THROW 50004, @ErrorMessage, 1;
+        END
     END
 
-    BEGIN TRY
-        BEGIN TRANSACTION;
+    -- 执行状态更新
+    UPDATE [Product]
+    SET Status = 'Active'
+    WHERE ProductID = @ProductID;
 
-        UPDATE [Product]
-        SET Status = 'Active',
-            AuditReason = NULL -- 激活时清除拒绝原因
-        WHERE ProductID = @productId;
+    IF @@ROWCOUNT = 0
+    BEGIN
+        SET @ErrorMessage = '更新商品状态失败，商品可能不存在或不符合激活条件。';
+        THROW 50005, @ErrorMessage, 1;
+    END
 
-        -- 记录审核操作（可选，但推荐用于审计）
-        -- INSERT INTO [AuditLog] (Action, EntityType, EntityId, ActorId, Timestamp, Details)
-        -- VALUES ('ProductActivated', 'Product', @productId, @adminId, GETDATE(), N'商品审核通过并上架。');
-
-        COMMIT TRANSACTION;
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0
-            ROLLBACK TRANSACTION;
-        DECLARE @ErrorMessage NVARCHAR(MAX) = ERROR_MESSAGE();
-        DECLARE @ErrorSeverity INT = ERROR_SEVERITY();
-        DECLARE @ErrorState INT = ERROR_STATE();
-        RAISERROR(@ErrorMessage, @ErrorSeverity, @ErrorState);
-    END CATCH
+    SELECT '商品激活成功' AS 消息; -- 返回成功消息
 END;
 GO
 
@@ -1029,6 +1053,50 @@ BEGIN
         DECLARE @ErrorSeverity INT = ERROR_SEVERITY();
         DECLARE @ErrorState INT = ERROR_STATE();
         RAISERROR(@ErrorMessage, @ErrorSeverity, @ErrorState);
+    END CATCH
+END;
+GO
+
+-- sp_UpdateProductStatus: 更新商品状态
+DROP PROCEDURE IF EXISTS [sp_UpdateProductStatus];
+GO
+CREATE PROCEDURE [sp_UpdateProductStatus]
+    @ProductID UNIQUEIDENTIFIER,
+    @NewStatus NVARCHAR(50),
+    @AuditReason NVARCHAR(500) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @ErrorMessage NVARCHAR(4000);
+
+    -- 验证新状态是否有效
+    IF @NewStatus NOT IN ('PendingReview', 'Active', 'Rejected', 'Sold', 'Withdrawn')
+    BEGIN
+        SET @ErrorMessage = '无效的商品状态: ' + @NewStatus;
+        THROW 50000, @ErrorMessage, 1;
+    END
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE [Product]
+        SET Status = @NewStatus,
+            AuditReason = CASE WHEN @NewStatus = 'Rejected' THEN @AuditReason ELSE NULL END -- 只有拒绝时才设置原因，其他情况清除
+        WHERE ProductID = @ProductID;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            SET @ErrorMessage = '更新商品状态失败，商品可能不存在。';
+            THROW 50001, @ErrorMessage, 1;
+        END
+
+        COMMIT TRANSACTION;
+        SELECT '商品状态更新成功' AS 消息;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+        THROW;
     END CATCH
 END;
 GO
