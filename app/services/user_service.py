@@ -107,6 +107,7 @@ class UserService:
         user_id = UUID(str(user_data['用户ID']))
         is_staff = user_data.get("是否管理员", False)
         is_verified = user_data.get("是否已认证", False)
+        is_super_admin = user_data.get("是否超级管理员", False)
         
         logger.debug(f"Checking status for user: {user_data['用户名']} (Status: {user_data['账户状态']})")
         if user_data['账户状态'] != "Active":
@@ -119,7 +120,8 @@ class UserService:
             "sub": str(user_id), # JWT standard 'sub' field for user ID
             "user_id": str(user_id), # Keep for backward compatibility if needed in some places
             "is_staff": is_staff,
-            "is_verified": is_verified
+            "is_verified": is_verified,
+            "is_super_admin": is_super_admin
         }
         logger.debug(f"Creating JWT token for user: {user_data['用户名']}")
         access_token = create_access_token(payload, expires_delta=access_token_expires)

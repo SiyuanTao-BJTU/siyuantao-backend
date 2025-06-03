@@ -464,7 +464,7 @@ BEGIN
         -- 检查依赖关系 (暂时简化或注释掉大部分，专注于删除逻辑本身)
         IF EXISTS (SELECT 1 FROM [Product] WHERE OwnerID = @userId AND Status NOT IN ('Sold', 'Withdrawn')) OR
            EXISTS (SELECT 1 FROM [Order] WHERE (BuyerID = @userId OR SellerID = @userId) AND Status NOT IN ('Completed', 'Cancelled')) OR
-           EXISTS (SELECT 1 FROM [Evaluation] WHERE BuyerID = @userId OR SellerID = @userId) OR
+           EXISTS (SELECT 1 FROM [Evaluation] E JOIN [Order] O ON E.OrderID = O.OrderID WHERE O.BuyerID = @userId OR O.SellerID = @userId) OR
            EXISTS (SELECT 1 FROM [Report] WHERE ReporterUserID = @userId OR ReportedUserID = @userId) OR
            EXISTS (SELECT 1 FROM [ReturnRequest] WHERE OrderID IN (SELECT OrderID FROM [Order] WHERE BuyerID = @userId OR SellerID = @userId)) OR
            EXISTS (
@@ -489,7 +489,7 @@ BEGIN
                 DELETE FROM [ChatMessage] WHERE SenderID = @userId OR ReceiverID = @userId;
 
                 -- 删除 Evaluation 记录 (Buyer 或 Seller)
-                DELETE FROM [Evaluation] WHERE BuyerID = @userId OR SellerID = @userId;
+                DELETE E FROM [Evaluation] E JOIN [Order] O ON E.OrderID = O.OrderID WHERE O.BuyerID = @userId OR O.SellerID = @userId;
 
                 -- 删除 Report 记录 (Reporter 或 Reported)
                 DELETE FROM [Report] WHERE ReporterUserID = @userId OR ReportedUserID = @userId;
@@ -935,5 +935,57 @@ BEGIN
 
     -- 增加一个额外的SELECT语句以满足复杂度要求
     SELECT '用户状态更新完成并查询成功' AS 结果;
+END;
+GO
+
+-- sp_UpdateUserStaffStatus: 更新用户的管理员状态
+DROP PROCEDURE IF EXISTS [sp_UpdateUserStaffStatus];
+GO
+CREATE PROCEDURE [sp_UpdateUserStaffStatus]
+    @UserID UNIQUEIDENTIFIER,
+    @NewIsStaff BIT,
+    @AdminID UNIQUEIDENTIFIER -- 执行此操作的管理员ID
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @ErrorMessage NVARCHAR(4000);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- 1. 验证 AdminID 是否为超级管理员
+        IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @AdminID AND IsSuperAdmin = 1)
+        BEGIN
+            SET @ErrorMessage = '只有超级管理员才能修改用户的管理员状态。';
+            THROW 50000, @ErrorMessage, 1; -- 自定义错误码，表示权限不足
+        END
+
+        -- 2. 验证 UserID 是否存在
+        IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @UserID)
+        BEGIN
+            SET @ErrorMessage = '要修改的用户不存在。';
+            THROW 50001, @ErrorMessage, 1; -- 自定义错误码，表示用户不存在
+        END
+
+        -- 3. 更新 IsStaff 状态
+        UPDATE [User]
+        SET IsStaff = @NewIsStaff
+        WHERE UserID = @UserID;
+
+        -- 检查更新是否成功
+        IF @@ROWCOUNT = 0
+        BEGIN
+            SET @ErrorMessage = '未能更新用户管理员状态，可能用户ID不正确或状态未改变。';
+            THROW 50002, @ErrorMessage, 1; -- 自定义错误码，表示更新失败
+        END
+
+        COMMIT TRANSACTION;
+        SELECT '用户管理员状态更新成功' AS 消息;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+        THROW; -- 重新抛出捕获的错误
+    END CATCH
 END;
 GO

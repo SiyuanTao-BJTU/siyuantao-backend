@@ -26,7 +26,8 @@ BEGIN
                      ELSE U.Credit + ((i.Rating - 3) * 2) -- 计算新的信用分
                    END
     FROM [User] U
-    JOIN inserted i ON U.UserID = i.SellerID; -- 更新的是被评价的卖家的信用分
+    JOIN [Order] O ON U.UserID = O.SellerID -- 从 Order 表获取 SellerID (对应中文列名)
+    JOIN inserted i ON O.OrderID = i.OrderID; -- 关联 inserted 表的 OrderID
 
     END TRY
     BEGIN CATCH -- 添加 CATCH 块

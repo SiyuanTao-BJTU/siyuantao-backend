@@ -93,6 +93,15 @@ class EvaluationService:
         evaluations_data = await self.evaluation_dal.get_evaluations_by_buyer_id(conn, buyer_id)
         return [EvaluationResponseSchema(**e) for e in evaluations_data]
 
+    async def get_evaluations_by_seller_id(
+        self,
+        conn: pyodbc.Connection,
+        seller_id: UUID
+    ) -> List[EvaluationResponseSchema]:
+        """获取指定卖家的评价列表。"""
+        evaluations_data = await self.evaluation_dal.get_evaluations_by_seller_id(conn, seller_id)
+        return [EvaluationResponseSchema(**e) for e in evaluations_data]
+
     async def get_evaluation_by_id(
         self,
         conn: pyodbc.Connection,

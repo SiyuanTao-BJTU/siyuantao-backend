@@ -31,7 +31,7 @@ class EvaluationDAL:
         Assumes sp_CreateEvaluation is modified to SELECT the newly created evaluation data.
         """
         sql = "{CALL sp_CreateEvaluation (?, ?, ?, ?)}"
-        params = (str(order_id), str(buyer_id), rating, comment)
+        params = (str(order_id), rating, comment, str(buyer_id))
 
         try:
             result = await self._execute_query(conn, sql, params, fetchone=True)
@@ -40,12 +40,16 @@ class EvaluationDAL:
             return result
         except pyodbc.Error as e:
             error_msg = str(e)
-            if "50001" in error_msg:
+            if "50012" in error_msg:
                 raise NotFoundError(f"评价创建失败: {error_msg}") from e
-            elif "50002" in error_msg:
-                raise IntegrityError(f"评价创建失败: {error_msg}") from e
-            elif "50003" in error_msg:
+            elif "50013" in error_msg:
                 raise ForbiddenError(f"评价创建失败: {error_msg}") from e
+            elif "50014" in error_msg:
+                raise IntegrityError(f"评价创建失败: {error_msg}") from e
+            elif "50015" in error_msg:
+                raise IntegrityError(f"评价创建失败: {error_msg}") from e
+            elif "50016" in error_msg:
+                raise ValueError(f"评价创建失败: {error_msg}") from e
             raise DALError(f"评价创建异常: {error_msg}") from e
         except Exception as e:
             raise DALError(f"评价创建时发生意外错误: {e}") from e
@@ -100,6 +104,23 @@ class EvaluationDAL:
             raise DALError(f"获取买家评价失败: {error_msg}") from e
         except Exception as e:
             raise DALError(f"获取买家评价时发生意外错误: {e}") from e
+
+    async def get_evaluations_by_seller_id(
+        self,
+        conn: pyodbc.Connection,
+        seller_id: UUID
+    ) -> List[Dict[str, Any]]:
+        """Fetches all evaluations received by a specific seller."""
+        sql = "{CALL sp_GetEvaluationsBySellerId (?)}"
+        params = (str(seller_id),)
+        try:
+            results = await self._execute_query(conn, sql, params, fetchall=True)
+            return results
+        except pyodbc.Error as e:
+            error_msg = str(e)
+            raise DALError(f"获取卖家评价失败: {error_msg}") from e
+        except Exception as e:
+            raise DALError(f"获取卖家评价时发生意外错误: {e}") from e
 
     async def get_all_evaluations(
         self,

@@ -799,20 +799,28 @@ class UserDAL:
             result = await self.execute_query_func(conn, sql, (user_id, new_is_staff, admin_id), fetchone=True)
             logger.debug(f"DAL: sp_UpdateUserStaffStatus returned: {result}")
             
-            if result and isinstance(result, dict) and result.get('OperationResultCode') == 1:
+            # 检查存储过程是否返回成功消息
+            if result and isinstance(result, dict) and result.get('消息') == '用户管理员状态更新成功':
                  logger.info(f"DAL: Staff status updated successfully for user {user_id}.")
                  return True
             
-            # Handle sp specific error codes
-            error_code = result.get('OperationResultCode')
-            if error_code == -1:
-                raise NotFoundError(f"User with ID {user_id} not found.")
-            elif error_code == -2:
-                 raise PermissionError(f"Admin with ID {admin_id} not authorized or not found.") # Use PermissionError for authorization issues
+            # 处理存储过程返回的错误消息（如果存在）
+            error_message = result.get('消息')
+            if error_message:
+                if '只有超级管理员才能修改用户的管理员状态。' in error_message:
+                    raise PermissionError("只有超级管理员才能更改用户管理员状态。")
+                elif '要修改的用户不存在。' in error_message:
+                    raise NotFoundError(f"User with ID {user_id} not found.")
+                elif '未能更新用户管理员状态，可能用户ID不正确或状态未改变。' in error_message:
+                    raise DALError(f"Failed to update staff status for user {user_id}: {error_message}")
+                else:
+                    # 对于其他未预期的错误消息，抛出通用DALError
+                    logger.error(f"DAL: Unexpected error message from sp_UpdateUserStaffStatus: {error_message}")
+                    raise DALError(f"Failed to update staff status for user {user_id}: {error_message}")
             else:
-                 # Log unexpected result and raise a generic error
+                 # Log unexpected result and raise a generic error if no specific message
                  logger.error(f"DAL: Unexpected result from sp_UpdateUserStaffStatus: {result}")
-                 raise DALError(f"Failed to update staff status for user {user_id}: Unexpected result code {error_code}")
+                 raise DALError(f"Failed to update staff status for user {user_id}: Unexpected response from database.")
 
         except (pyodbc.ProgrammingError, pyodbc.IntegrityError) as e:
             logger.error(f"DAL: Database error updating staff status for user {user_id}: {e}")

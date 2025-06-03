@@ -97,14 +97,10 @@ GO
 CREATE TABLE [Evaluation] (
     [EvaluationID] UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(), -- 评价唯一标识符，主键
     [OrderID] UNIQUEIDENTIFIER NOT NULL,                        -- 评价关联的订单ID，不允许为空
-    [SellerID] UNIQUEIDENTIFIER NOT NULL,                       -- 被评价的卖家用户ID
-    [BuyerID] UNIQUEIDENTIFIER NOT NULL,                        -- 提交评价的买家用户ID
     [Rating] INT NOT NULL CHECK ([Rating] BETWEEN 1 AND 5),     -- 星级评分，1到5星，不允许为空
     [Content] NVARCHAR(500) NULL,                               -- 评价内容，可为空
     [CreateTime] DATETIME NOT NULL DEFAULT GETDATE(),           -- 评价创建时间，不允许为空，默认当前系统时间
     CONSTRAINT FK_Evaluation_Order FOREIGN KEY ([OrderID]) REFERENCES [Order]([OrderID]), -- 外键关联订单
-    CONSTRAINT FK_Evaluation_Seller FOREIGN KEY ([SellerID]) REFERENCES [User]([UserID]), -- 外键关联被评价的卖家
-    CONSTRAINT FK_Evaluation_Buyer FOREIGN KEY ([BuyerID]) REFERENCES [User]([UserID]), -- 外键关联提交评价的买家
     -- 核心改变：添加唯一约束，确保同一个订单只能被评价一次。
     -- 这意味着一旦一个订单被评价，任何人都不能再次评价它。
     CONSTRAINT UQ_Evaluation_OrderID UNIQUE ([OrderID])

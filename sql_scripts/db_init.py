@@ -1375,10 +1375,10 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
     try:
         cursor.execute(
             """
-            INSERT INTO [Evaluation] (EvaluationID, OrderID, SellerID, BuyerID, Rating, Content, CreateTime)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO [Evaluation] (EvaluationID, OrderID, Rating, Content, CreateTime)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            evaluation1_id, order1_id, alice_id, bob_id, 5, "卖家响应迅速，商品描述属实，交易非常顺利！", datetime.now()
+            evaluation1_id, order1_id, 5, "卖家响应迅速，商品描述属实，交易非常顺利！", datetime.now()
         )
         logger.info("Evaluation 1 inserted.")
     except pyodbc.Error as e:
@@ -1507,10 +1507,10 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
         try:
             cursor.execute(
                 """
-                INSERT INTO [Evaluation] (EvaluationID, OrderID, SellerID, BuyerID, Rating, Content, CreateTime)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO [Evaluation] (EvaluationID, OrderID, Rating, Content, CreateTime)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                eval_pxk_cyq_shoes, order_pxk_cyq_shoes, cyq_id, pxk_id, 5, "鞋子很新，描述准确，卖家回复及时，好评！", datetime.now()
+                eval_pxk_cyq_shoes, order_pxk_cyq_shoes, 5, "鞋子很新，描述准确，卖家回复及时，好评！", datetime.now()
             )
             logger.info("Evaluation (Pxk evaluates Cyq) inserted.")
         except pyodbc.Error as e:
@@ -1575,10 +1575,10 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
         try:
             cursor.execute(
                 """
-                INSERT INTO [Evaluation] (EvaluationID, OrderID, SellerID, BuyerID, Rating, Content, CreateTime)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO [Evaluation] (EvaluationID, OrderID, Rating, Content, CreateTime)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                eval_zsq_pxk_monitor, order_zsq_pxk_monitor, pxk_id, zsq_id, 4, "显示器状态不错，可惜附赠的线材有点短。", datetime.now()
+                eval_zsq_pxk_monitor, order_zsq_pxk_monitor, 4, "显示器状态不错，可惜附赠的线材有点短。", datetime.now()
             )
             logger.info("Evaluation (Zsq evaluates Pxk) inserted.")
         except pyodbc.Error as e:
