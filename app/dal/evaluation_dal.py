@@ -35,7 +35,7 @@ class EvaluationDAL:
 
         try:
             result = await self._execute_query(conn, sql, params, fetchone=True)
-            if not result or result.get("EvaluationID") is None:
+            if not result or result.get("评价ID") is None:
                 raise DALError("创建评价失败，未返回评价ID")
             return result
         except pyodbc.Error as e:
