@@ -7,7 +7,8 @@ from app.schemas.user_schemas import (
     UserPasswordUpdate, # Import necessary schemas
     UserStatusUpdateSchema, # Added for new admin endpoint
     UserCreditAdjustmentSchema, # Added for new admin endpoint
-    RequestVerificationEmail # Import the schema for requesting verification email
+    RequestVerificationEmail, # Import the schema for requesting verification email
+    UserPublicProfileResponseSchema # 新增：导入公共用户资料Schema
 )
 # from app.dal import users as user_dal # No longer needed
 # from app.services import user_service # No longer needed (using dependency)
@@ -177,8 +178,8 @@ async def get_user_profile_by_id(
 async def update_user_profile_by_id(
     user_id: UUID, # Path parameter here
     user_update_data: UserProfileUpdateSchema, # Request body here
-    conn: pyodbc.Connection = Depends(get_db_connection), # Inject DB connection
-    user_service: UserService = Depends(get_user_service), # Inject Service
+    conn: pyodbc.Connection = Depends(get_db_connection),
+    user_service: UserService = Depends(get_user_service),
     current_admin_user: dict = Depends(get_current_active_admin_user)
 ):
     """
@@ -371,3 +372,26 @@ async def adjust_user_credit_by_id(
     except Exception as e:
         logger.error(f"Unexpected error adjusting credit for user {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="调整用户信用分时发生内部错误")
+
+# 公开的用户资料接口
+@router.get("/{user_id}/public_profile", response_model=UserPublicProfileResponseSchema, response_model_by_alias=False)
+async def get_public_user_profile_by_id(
+    user_id: UUID, # Path parameter
+    conn: pyodbc.Connection = Depends(get_db_connection),
+    user_service: UserService = Depends(get_user_service)
+):
+    """
+    根据用户 ID 获取用户公开的个人资料 (无需认证)。
+    """
+    try:
+        public_profile = await user_service.get_user_public_profile(conn, user_id)
+        if not public_profile:
+            raise NotFoundError("用户未找到")
+        return public_profile
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except DALError as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while getting public user profile for ID {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")

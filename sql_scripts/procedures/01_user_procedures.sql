@@ -39,6 +39,34 @@ BEGIN
 END;
 GO
 
+-- sp_GetUserPublicProfileById: 根据用户ID获取公开的用户信息
+DROP PROCEDURE IF EXISTS [sp_GetUserPublicProfileById];
+GO
+CREATE PROCEDURE [sp_GetUserPublicProfileById]
+    @UserID UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    -- 检查用户是否存在
+    IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @UserID)
+    BEGIN
+        RAISERROR('用户不存在。', 16, 1);
+        RETURN;
+    END
+
+    -- 返回公开的用户信息
+    SELECT
+        UserName AS 用户名,
+        Credit AS 信用分,
+        AvatarUrl AS 头像URL,
+        Bio AS 个人简介,
+        PhoneNumber AS 手机号码 -- 手机号码作为公开信息的一部分
+    FROM [User]
+    WHERE UserID = @UserID;
+END;
+GO
+
 -- 根据用户名获取用户（包括密码哈希），用于登录
 DROP PROCEDURE IF EXISTS [sp_GetUserByUsernameWithPassword];
 GO

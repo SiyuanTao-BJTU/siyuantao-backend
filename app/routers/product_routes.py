@@ -5,7 +5,7 @@ from ..schemas.product import ProductCreate, ProductUpdate
 from app.schemas.product_schemas import ProductResponseSchema
 from ..dependencies import get_current_authenticated_user, get_current_active_admin_user, get_product_service, get_db_connection
 import pyodbc
-from typing import List, Optional
+from typing import List, Optional, Dict
 import os # Import os for file operations
 from app.schemas.user_schemas import UserResponseSchema # 添加导入
 from app.exceptions import NotFoundError, IntegrityError, DALError, ForbiddenError, PermissionError # Import specific exceptions
@@ -75,6 +75,25 @@ async def get_product_list(category_name: str = None, status: str = None, keywor
         raise HTTPException(status_code=fastapi_status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"An unexpected error occurred while getting product list: {e}", exc_info=True)
+        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+
+@router.get("/statistics", response_model=Dict[str, int], response_model_by_alias=False)
+async def get_product_statistics(
+    conn: pyodbc.Connection = Depends(get_db_connection),
+    product_service: ProductService = Depends(get_product_service),
+    admin_user: dict = Depends(get_current_active_admin_user) # 确保只有管理员能访问
+):
+    """
+    获取商品状态统计数据。
+    """
+    try:
+        stats = await product_service.get_product_status_counts(conn)
+        return stats
+    except ForbiddenError as e:
+        raise HTTPException(status_code=fastapi_status.HTTP_403_FORBIDDEN, detail=str(e))
+    except DALError as e:
+        raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
+    except Exception as e:
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
 
 @router.post("", status_code=fastapi_status.HTTP_201_CREATED)
@@ -438,3 +457,4 @@ async def withdraw_product(product_id: UUID,
     except Exception as e:
         logger.error(f"An unexpected error occurred while withdrawing product {product_id} by user {current_user['用户ID']}: {e}", exc_info=True) # Use Chinese key
         raise HTTPException(status_code=fastapi_status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"服务器内部错误: {e}")
+

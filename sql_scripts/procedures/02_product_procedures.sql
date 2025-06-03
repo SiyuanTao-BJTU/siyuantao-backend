@@ -75,6 +75,7 @@ BEGIN
         p.PostTime AS 发布时间,
         p.Status AS 商品状态,
         u.UserName AS 卖家用户名,
+        p.OwnerID AS 卖家ID,
         p.CategoryName AS 分类名称,
         pi.ImageURL AS 主图URL,
         COUNT(p.ProductID) OVER() AS 总商品数
@@ -246,6 +247,7 @@ BEGIN
             p.PostTime AS 发布时间,
             p.Status AS 商品状态,
             u.UserName AS 卖家用户名,
+            p.OwnerID AS 卖家ID,
             p.CategoryName AS 分类名称
         FROM [Product] p
         JOIN [User] u ON p.OwnerID = u.UserID
@@ -1098,5 +1100,28 @@ BEGIN
             ROLLBACK TRANSACTION;
         THROW;
     END CATCH
+END;
+GO
+
+-- sp_GetProductStatusCounts: 获取商品状态统计数量
+-- 功能: 统计所有商品的各种状态数量，包括总数
+DROP PROCEDURE IF EXISTS [sp_GetProductStatusCounts];
+GO
+CREATE PROCEDURE [sp_GetProductStatusCounts]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT 
+        Status AS ProductStatus, 
+        COUNT(ProductID) AS Count
+    FROM [Product]
+    GROUP BY Status
+    UNION ALL
+    SELECT 
+        'Total' AS ProductStatus, 
+        COUNT(ProductID) AS Count
+    FROM [Product];
+
 END;
 GO

@@ -113,11 +113,7 @@ async def get_evaluations_by_product_id_route(
     """
     try:
         evaluations = await evaluation_service.get_evaluations_by_product_id(conn, product_id)
-        if not evaluations:
-            raise NotFoundError(f"未找到商品 {product_id} 的任何评价")
         return evaluations
-    except NotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DALError as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
     except Exception as e:
@@ -135,11 +131,7 @@ async def get_my_evaluations_route(
     buyer_id = current_user["用户ID"]
     try:
         evaluations = await evaluation_service.get_evaluations_by_buyer_id(conn, buyer_id)
-        if not evaluations:
-            raise NotFoundError(f"未找到买家 {buyer_id} 的任何评价")
         return evaluations
-    except NotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DALError as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
     except Exception as e:
@@ -157,11 +149,7 @@ async def get_my_evaluations_received_route(
     seller_id = current_user["用户ID"]
     try:
         evaluations = await evaluation_service.get_evaluations_by_seller_id(conn, seller_id)
-        if not evaluations:
-            raise NotFoundError(f"未找到卖家 {seller_id} 的任何评价")
         return evaluations
-    except NotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DALError as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
     except Exception as e:
@@ -178,11 +166,7 @@ async def get_evaluation_by_id_route(
     """
     try:
         evaluation = await evaluation_service.get_evaluation_by_id(conn, evaluation_id)
-        if not evaluation:
-            raise NotFoundError(f"评价ID {evaluation_id} 未找到")
         return evaluation
-    except NotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DALError as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"数据库操作失败: {e}")
     except Exception as e:

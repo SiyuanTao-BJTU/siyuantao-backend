@@ -472,3 +472,16 @@ class ProductService:
         except Exception as e:
             logger.error(f"Unexpected error batch rejecting products: {e}", exc_info=True)
             raise InternalServerError("批量拒绝商品失败") # Modified: Specific error message
+
+    async def get_product_status_counts(self, conn: pyodbc.Connection) -> Dict[str, int]:
+        """
+        获取商品状态统计数量。
+        """
+        try:
+            stats = await self.product_dal.get_product_status_counts(conn)
+            logger.info(f"Service: get_product_status_counts returning: {stats}")
+            return stats
+        except DALError as e:
+            raise DALError(f"获取商品状态统计失败: {e}") from e
+        except Exception as e:
+            raise DALError(f"获取商品状态统计时发生意外错误: {e}") from e

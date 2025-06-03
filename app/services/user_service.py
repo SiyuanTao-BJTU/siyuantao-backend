@@ -1,7 +1,7 @@
 # app/services/user_service.py
 import pyodbc
 from uuid import UUID
-from typing import Optional, Callable, Awaitable, List, Dict
+from typing import Optional, Callable, Awaitable, List, Dict, Any
 import logging
 import re # Import regex for email validation
 import uuid
@@ -145,6 +145,21 @@ class UserService:
         # Convert DAL response keys to match UserResponseSchema
         logger.debug(f"Converting DAL user data to schema for ID: {user_id}") # Add logging
         return self._convert_dal_user_to_schema(user) # Return the converted dict
+
+    async def get_user_public_profile(
+        self, conn: pyodbc.Connection, user_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Service layer function to get public user profile by ID.
+        Handles NotFoundError from DAL.
+        """
+        logger.info(f"Attempting to get public user profile by ID: {user_id}")
+        public_profile = await self.user_dal.get_user_public_profile_by_id(conn, user_id)
+        if not public_profile:
+            logger.warning(f"Public user profile not found for ID: {user_id}")
+            raise NotFoundError(f"User with ID {user_id} not found.")
+        logger.debug(f"Public user profile retrieved for ID: {user_id}")
+        return public_profile
 
     async def update_user_profile(self, conn: pyodbc.Connection, user_id: UUID, user_update_data: UserProfileUpdateSchema) -> UserResponseSchema:
         """

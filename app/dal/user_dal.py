@@ -50,6 +50,41 @@ class UserDAL:
             raise DALError(
                 f"Database error while fetching user profile: {e}") from e
 
+    async def get_user_public_profile_by_id(
+        self, conn: pyodbc.Connection, user_id: UUID
+    ) -> Optional[Dict[str, Any]]:
+        """从数据库获取指定 ID 的用户公开信息。"""
+        logger.debug(f"DAL: Attempting to get public user profile by ID: {user_id}")
+        sql = "{CALL sp_GetUserPublicProfileById(?)}"
+        try:
+            result = await self.execute_query_func(conn, sql, (user_id,), fetchone=True)
+            logger.debug(
+                f"DAL: sp_GetUserPublicProfileById for ID {user_id} returned: {result}"
+            )
+            if result and isinstance(result, dict):
+                # Check for explicit error messages from SP indicating user not found
+                if (
+                    "用户不存在。" in result.values()
+                    or "User not found." in result.values()
+                ):
+                    logger.debug(f"DAL: Public user profile with ID {user_id} not found according to SP.")
+                    return None  # 用户不存在
+                return result
+            logger.warning(
+                f"DAL: sp_GetUserPublicProfileById for ID {user_id} returned unexpected type or None: {result}"
+            )
+            return None
+        except pyodbc.Error as e:
+            logger.error(f"DAL: Database error getting public user profile by ID {user_id}: {e}")
+            raise DALError(
+                f"Database error while fetching public user profile: {e}"
+            ) from e
+        except Exception as e:
+            logger.error(
+                f"DAL: Unexpected error getting public user profile by ID {user_id}: {e}"
+            )
+            raise e
+
     async def get_user_by_username_with_password(self, conn: pyodbc.Connection, username: str) -> dict | None:
         """从数据库获取指定用户名的用户（包含密码哈希），用于登录。"""
         logger.debug(

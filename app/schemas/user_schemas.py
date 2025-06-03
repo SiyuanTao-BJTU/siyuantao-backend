@@ -59,6 +59,18 @@ class UserResponseSchema(BaseModel):
         populate_by_name = True # Pydantic v2: 允许通过别名填充模型
         # orm_mode = True # Pydantic v1 equivalent
 
+# 新增：用户公开资料响应Schema
+class UserPublicProfileResponseSchema(BaseModel):
+    用户名: str = Field(..., alias="username", description="用户名")
+    信用分: int = Field(..., alias="credit", description="信用分")
+    头像URL: Optional[str] = Field(None, alias="avatar_url", description="头像URL")
+    个人简介: Optional[str] = Field(None, alias="bio", description="个人简介")
+    手机号码: Optional[str] = Field(None, alias="phone_number", description="手机号码")
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+
 # Schema for JWT Token response
 # Name already matches plan: Token
 class Token(BaseModel):

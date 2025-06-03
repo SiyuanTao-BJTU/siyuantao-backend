@@ -488,6 +488,48 @@ class ProductDAL:
             logger.error(f"Unexpected Error updating product {product_id} status to {new_status}: {e}")
             raise e
 
+    async def get_product_status_counts(self, conn: pyodbc.Connection) -> Dict[str, int]:
+        """
+        获取所有商品按状态分类的统计数量。
+        
+        Args:
+            conn: 数据库连接对象
+        
+        Returns:
+            一个字典，键为商品状态（如 'Active', 'PendingReview' 等），值为对应数量。
+            同时包含一个 'Total' 键表示所有商品的总数。
+        
+        Raises:
+            DALError: 数据库操作失败时抛出
+        """
+        sql = "{CALL sp_GetProductStatusCounts()}"
+        try:
+            results = await self._execute_query(conn, sql, fetchall=True) # fetchall=True to get all rows
+            counts = {'Total': 0} # Initialize with Total
+            if results:
+                for row in results:
+                    status = row.get('ProductStatus')
+                    count_value = row.get('Count') # Rename variable to avoid confusion with type casting
+
+                    # Ensure count_value is treated as an integer if it's not None
+                    if status and count_value is not None:
+                        try:
+                            count = int(count_value) # Explicitly cast to int
+                            counts[status] = count
+                            counts['Total'] += count # Accumulate total
+                        except ValueError:
+                            logger.warning(f"DAL: Could not convert count_value '{count_value}' to int for status '{status}'. Skipping this entry.")
+                    else:
+                        logger.warning(f"DAL: Skipping row due to missing ProductStatus or Count: {row}")
+
+            return counts
+        except pyodbc.Error as e:
+            logger.error(f"DAL Error getting product status counts: {e}")
+            raise DALError(f"Database error getting product status counts: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected Error getting product status counts: {e}")
+            raise e
+
 
 class ProductImageDAL:
     """
