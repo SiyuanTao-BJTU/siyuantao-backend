@@ -3,7 +3,7 @@
  */
 
 -- sp_CreateReturnRequest: 买家发起退货请求
--- 输入: @orderId UNIQUEIDENTIFIER, @buyerId UNIQUEIDENTIFIER, @returnReason NVARCHAR(MAX)
+-- 输入: @orderId UNIQUEIDENTIFIER, @buyerId UNIQUEIDENTIFIER, @requestReasonDetail NVARCHAR(MAX), @returnReasonCode VARCHAR(100)
 -- 逻辑: 检查订单是否存在、买家是否匹配、订单状态是否允许退货。
 --       检查是否已存在此订单的退货请求。
 --       插入新的 ReturnRequest 记录，状态设为 '等待卖家处理'。
@@ -13,7 +13,8 @@ GO
 CREATE PROCEDURE [sp_CreateReturnRequest]
     @orderId UNIQUEIDENTIFIER,
     @buyerId UNIQUEIDENTIFIER,
-    @returnReason NVARCHAR(MAX)
+    @requestReasonDetail NVARCHAR(MAX), -- Renamed from @returnReason for clarity, this is the detailed text by user
+    @returnReasonCode VARCHAR(100)    -- New: Standardized reason code
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -22,6 +23,8 @@ BEGIN
     DECLARE @currentOrderStatus NVARCHAR(50);
     DECLARE @productId UNIQUEIDENTIFIER;
     DECLARE @sellerId UNIQUEIDENTIFIER;
+    DECLARE @newReturnRequestId UNIQUEIDENTIFIER = NEWID(); -- Generate ID upfront
+    DECLARE @initialLog NVARCHAR(MAX);
 
     -- 检查买家是否存在
     IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @buyerId)
@@ -67,30 +70,37 @@ BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
 
+        SET @initialLog = FORMAT(GETDATE(), 'yyyy-MM-dd HH:mm:ss') + N' - Buyer (ID: ' + CAST(@buyerId AS VARCHAR(36)) + N') initiated return. Reason Code: ' + ISNULL(@returnReasonCode, 'N/A') + N'. Details: ' + @requestReasonDetail;
+
         INSERT INTO [ReturnRequest] (
+            ReturnRequestID, -- Use pre-generated ID
             OrderID,
             BuyerID,
             SellerID,
-            RequestReason,
+            RequestReason, -- Store the detailed text reason here
+            ReturnReasonCode, -- Store the standardized code
             RequestDate,
-            Status
+            Status,
+            ResolutionDetails -- Initial log entry
         )
         VALUES (
+            @newReturnRequestId,
             @orderId,
             @buyerId,
             @sellerId,
-            @returnReason,
+            @requestReasonDetail,
+            @returnReasonCode,
             GETDATE(),
-            N\'等待卖家处理\' -- 初始状态
+            N'等待卖家处理',
+            @initialLog
         );
 
         UPDATE [Order]
-        SET OrderStatus = N\'退货申请中\'
+        SET OrderStatus = N'退货申请中'
         WHERE OrderID = @orderId;
 
         COMMIT TRANSACTION;
-        SELECT \'退货请求已成功创建。\' AS Result, SCOPE_IDENTITY() AS NewReturnRequestID; -- 注意: SCOPE_IDENTITY() 可能不适用UNIQUEIDENTIFIER PK，应返回基于NEWID()的值
-                                                                                    -- 考虑返回刚插入的ID，如果ReturnRequestID是NEWID()生成的，需要先生成再插入
+        SELECT @newReturnRequestId AS NewReturnRequestID, N'退货请求已成功创建。' AS Result;
     END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0
@@ -111,7 +121,7 @@ CREATE PROCEDURE [sp_HandleReturnRequest]
     @returnRequestId UNIQUEIDENTIFIER,
     @sellerId UNIQUEIDENTIFIER,
     @isAgree BIT,
-    @auditIdea NVARCHAR(MAX)
+    @auditIdea NVARCHAR(MAX) -- Seller's notes or comments
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -120,6 +130,8 @@ BEGIN
     DECLARE @currentReturnStatus NVARCHAR(50);
     DECLARE @orderId UNIQUEIDENTIFIER;
     DECLARE @requestSellerId UNIQUEIDENTIFIER;
+    DECLARE @currentResolutionDetails NVARCHAR(MAX);
+    DECLARE @logEntry NVARCHAR(MAX);
 
     -- 检查卖家是否存在
     IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @sellerId)
@@ -128,7 +140,10 @@ BEGIN
         RETURN;
     END
 
-    SELECT @currentReturnStatus = RR.Status, @orderId = RR.OrderID, @requestSellerId = RR.SellerID
+    SELECT @currentReturnStatus = RR.Status, 
+           @orderId = RR.OrderID, 
+           @requestSellerId = RR.SellerID,
+           @currentResolutionDetails = ISNULL(RR.ResolutionDetails, N'')
     FROM [ReturnRequest] RR
     WHERE RR.ReturnRequestID = @returnRequestId;
 
@@ -152,24 +167,33 @@ BEGIN
 
     DECLARE @newReturnStatus NVARCHAR(50);
     DECLARE @newOrderStatus NVARCHAR(50);
+    DECLARE @actionTaken NVARCHAR(50);
 
     IF @isAgree = 1
     BEGIN
         SET @newReturnStatus = N\'卖家同意退货\';
         SET @newOrderStatus = N\'退货中\'; -- 或 \'等待买家退货\'
+        SET @actionTaken = N\'AGREED\';
     END
     ELSE
     BEGIN
         SET @newReturnStatus = N\'卖家拒绝退货\';
         SET @newOrderStatus = N\'退货申请被拒\'; -- 或恢复到申请前状态，或保持 \'退货申请中\' 并由买家决定下一步
+        SET @actionTaken = N\'REJECTED\';
     END
+
+    SET @logEntry = CHAR(13) + CHAR(10) + FORMAT(GETDATE(), 'yyyy-MM-dd HH:mm:ss') + 
+                    N' - Seller (ID: ' + CAST(@sellerId AS VARCHAR(36)) + 
+                    N') processed: ' + @actionTaken + 
+                    N'. Notes: ' + ISNULL(@auditIdea, 'N/A');
 
     BEGIN TRY
         BEGIN TRANSACTION;
 
         UPDATE [ReturnRequest]
         SET Status = @newReturnStatus,
-            SellerNotes = @auditIdea,
+            SellerNotes = @auditIdea, -- Keep this for seller specific private notes if different from public log
+            ResolutionDetails = @currentResolutionDetails + @logEntry, -- Append to the log
             SellerActionDate = GETDATE()
         WHERE ReturnRequestID = @returnRequestId;
 
@@ -189,14 +213,15 @@ END;
 GO
 
 -- sp_BuyerRequestIntervention: 买家申请管理员介入
--- 输入: @returnRequestId UNIQUEIDENTIFIER, @buyerId UNIQUEIDENTIFIER
+-- 输入: @returnRequestId UNIQUEIDENTIFIER, @buyerId UNIQUEIDENTIFIER, @interventionReason NVARCHAR(MAX)
 -- 逻辑: 检查退货请求是否存在、是否属于该买家、状态是否允许介入 (例如 '卖家拒绝退货')。
 --       更新 ReturnRequest 状态为 '等待管理员介入'。
 DROP PROCEDURE IF EXISTS [sp_BuyerRequestIntervention];
 GO
 CREATE PROCEDURE [sp_BuyerRequestIntervention]
     @returnRequestId UNIQUEIDENTIFIER,
-    @buyerId UNIQUEIDENTIFIER
+    @buyerId UNIQUEIDENTIFIER,
+    @interventionReason NVARCHAR(MAX) -- Reason for requesting intervention
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -205,11 +230,16 @@ BEGIN
     DECLARE @currentReturnStatus NVARCHAR(50);
     DECLARE @orderId UNIQUEIDENTIFIER;
     DECLARE @requestBuyerId UNIQUEIDENTIFIER;
+    DECLARE @currentResolutionDetails NVARCHAR(MAX);
+    DECLARE @logEntry NVARCHAR(MAX);
 
     IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @buyerId)
     BEGIN RAISERROR(\'买家用户不存在。\', 16, 1); RETURN; END
 
-    SELECT @currentReturnStatus = RR.Status, @orderId = RR.OrderID, @requestBuyerId = RR.BuyerID
+    SELECT @currentReturnStatus = RR.Status, 
+           @orderId = RR.OrderID, 
+           @requestBuyerId = RR.BuyerID,
+           @currentResolutionDetails = ISNULL(RR.ResolutionDetails, N'')
     FROM [ReturnRequest] RR
     WHERE RR.ReturnRequestID = @returnRequestId;
 
@@ -226,11 +256,16 @@ BEGIN
         RETURN;
     END
 
+    SET @logEntry = CHAR(13) + CHAR(10) + FORMAT(GETDATE(), 'yyyy-MM-dd HH:mm:ss') + 
+                    N' - Buyer (ID: ' + CAST(@buyerId AS VARCHAR(36)) + 
+                    N') requested admin intervention. Reason: ' + ISNULL(@interventionReason, 'N/A');
+
     BEGIN TRY
         BEGIN TRANSACTION;
 
         UPDATE [ReturnRequest]
-        SET Status = N\'等待管理员介入\'
+        SET Status = N\'等待管理员介入\',
+            ResolutionDetails = @currentResolutionDetails + @logEntry -- Append to the log
         WHERE ReturnRequestID = @returnRequestId;
 
         -- 可选：更新订单状态
@@ -250,17 +285,17 @@ END;
 GO
 
 -- sp_AdminResolveReturnRequest: 管理员处理退货介入
--- 输入: @returnRequestId UNIQUEIDENTIFIER, @adminId UNIQUEIDENTIFIER, @status NVARCHAR(50), @auditIdea NVARCHAR(MAX)
+-- 输入: @returnRequestId UNIQUEIDENTIFIER, @adminId UNIQUEIDENTIFIER, @resolutionAction NVARCHAR(100), @adminNotes NVARCHAR(MAX)
 -- 逻辑: 检查退货请求是否存在、管理员是否有效、状态是否为 '等待管理员介入'。
---       根据 @status (新的退货请求状态) 更新 ReturnRequest。
+--       根据 @resolutionAction (新的退货请求状态) 更新 ReturnRequest。
 --       相应更新 Order 状态 (例如 '已退款', '退货关闭' 等)。
 DROP PROCEDURE IF EXISTS [sp_AdminResolveReturnRequest];
 GO
 CREATE PROCEDURE [sp_AdminResolveReturnRequest]
     @returnRequestId UNIQUEIDENTIFIER,
     @adminId UNIQUEIDENTIFIER,
-    @newStatus NVARCHAR(50), -- 例如：'管理员同意退款', '管理员支持卖家', '退款完成', '请求已关闭'
-    @auditIdea NVARCHAR(MAX)
+    @resolutionAction NVARCHAR(100), -- e.g., 'REFUND_APPROVED', 'RETURN_DECLINED_BY_ADMIN', 'PARTIAL_REFUND'
+    @adminNotes NVARCHAR(MAX)
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -268,12 +303,22 @@ BEGIN
 
     DECLARE @currentReturnStatus NVARCHAR(50);
     DECLARE @orderId UNIQUEIDENTIFIER;
+    DECLARE @newReturnStatus NVARCHAR(50);
+    DECLARE @newOrderStatus NVARCHAR(50);
+    DECLARE @currentResolutionDetails NVARCHAR(MAX);
+    DECLARE @logEntry NVARCHAR(MAX);
 
-    -- 检查管理员是否存在 (可选，也可在应用层校验)
-    -- IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @adminId AND UserType = \'Admin\')
-    -- BEGIN RAISERROR(\'管理员用户不存在或无权限。\', 16, 1); RETURN; END
+    -- Check admin (Assuming Admin is a User with a specific role, or a separate AdminUsers table)
+    -- For simplicity, we'll just check if @adminId exists in User table. Add role check in service layer.
+    IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @adminId)
+    BEGIN
+        RAISERROR(N'管理员用户不存在。', 16, 1);
+        RETURN;
+    END
 
-    SELECT @currentReturnStatus = RR.Status, @orderId = RR.OrderID
+    SELECT @currentReturnStatus = RR.Status, 
+           @orderId = RR.OrderID,
+           @currentResolutionDetails = ISNULL(RR.ResolutionDetails, N'')
     FROM [ReturnRequest] RR
     WHERE RR.ReturnRequestID = @returnRequestId;
 
@@ -282,59 +327,53 @@ BEGIN
 
     IF @currentReturnStatus != N\'等待管理员介入\'
     BEGIN
-        RAISERROR(\'此退货请求当前状态不是"等待管理员介入"，无法由管理员处理。\', 16, 1);
+        RAISERROR(\'此退货请求当前状态不是 \"等待管理员介入\"，无法操作。\', 16, 1);
         RETURN;
     END
 
-    -- 校验 @newStatus 是否是合法的管理员处理后状态
-    IF @newStatus NOT IN (N\'管理员同意退款\', N\'管理员支持卖家\', N\'退款完成\', N\'请求已关闭\')
+    -- Determine new statuses based on @resolutionAction
+    -- This logic might be more complex and involve Order status updates too
+    IF @resolutionAction = N\'REFUND_APPROVED\' -- Example action
     BEGIN
-        RAISERROR(\'无效的管理员处理状态。\', 16, 1);
+        SET @newReturnStatus = N\'退款完成\';
+        SET @newOrderStatus = N\'已退款\'; -- Or relevant order status
+    END
+    ELSE IF @resolutionAction = N\'RETURN_DECLINED_BY_ADMIN\' -- Example action
+    BEGIN
+        SET @newReturnStatus = N\'请求已关闭\'; -- Or '管理员拒绝退货'
+        SET @newOrderStatus = N\'退货已关闭\'; -- Or revert to a pre-return status
+    END
+    ELSE
+    BEGIN
+        -- Handle other actions or raise error for unknown action
+        RAISERROR(N\'无效的管理员操作代码。\', 16, 1);
         RETURN;
-    END
+    END;
 
-    DECLARE @newOrderStatus NVARCHAR(50);
-    IF @newStatus IN (N\'管理员同意退款\', N\'退款完成\')
-    BEGIN
-        SET @newOrderStatus = N\'已退款\';
-    END
-    ELSE IF @newStatus = N\'管理员支持卖家\' OR @newStatus = N\'请求已关闭\' -- 支持卖家，则订单可能恢复原状或关闭
-    BEGIN
-        -- 这里的逻辑需要根据业务确定，例如订单恢复到 \'已完成\' (如果之前是) 或 \'已关闭\'
-        -- 为简化，我们统一设置为 \'已关闭\' (如果退货流程结束且未退款)
-        -- 或者，订单状态可能不需要改变，只改变退货请求状态
-        SET @newOrderStatus = N\'已完成\'; -- 假设支持卖家，则退货流程结束，订单状态回归
-        IF (SELECT OrderStatus FROM [Order] WHERE OrderID = @orderId) = N\'退货申请中\' OR
-           (SELECT OrderStatus FROM [Order] WHERE OrderID = @orderId) = N\'等待管理员介入\'
-        BEGIN
-             -- 根据业务逻辑决定订单的最终状态，这里暂定为 '已完成'
-             -- 或者查找退货申请前的状态并恢复
-             -- 此处简化处理，如果管理员支持卖家，则订单可以认为交易完成。
-             SET @newOrderStatus = N\'已完成\';
-        END
-    END
-
+    SET @logEntry = CHAR(13) + CHAR(10) + FORMAT(GETDATE(), 'yyyy-MM-dd HH:mm:ss') + 
+                    N' - Admin (ID: ' + CAST(@adminId AS VARCHAR(36)) + 
+                    N') resolved: ' + @resolutionAction + 
+                    N'. Notes: ' + ISNULL(@adminNotes, 'N/A');
 
     BEGIN TRY
         BEGIN TRANSACTION;
 
         UPDATE [ReturnRequest]
-        SET Status = @newStatus,
-            AdminID = @adminId,
-            AdminNotes = @auditIdea,
-            AdminActionDate = GETDATE()
+        SET Status = @newReturnStatus,
+            AdminNotes = @adminNotes, -- Keep specific admin notes if needed
+            ResolutionDetails = @currentResolutionDetails + @logEntry, -- Append to the log
+            ResolutionDate = GETDATE()
         WHERE ReturnRequestID = @returnRequestId;
 
-        IF @newOrderStatus IS NOT NULL
-        BEGIN
-            UPDATE [Order]
-            SET OrderStatus = @newOrderStatus
-            WHERE OrderID = @orderId;
-        END
-        -- TODO: 如果是 \'退款完成\'，可能需要触发实际的退款操作或记录。
+        UPDATE [Order]
+        SET OrderStatus = @newOrderStatus -- Update order status accordingly
+        WHERE OrderID = @orderId;
+
+        -- TODO: Consider further actions like triggering refund process, updating stock etc.
+        -- These would typically be handled by the service layer calling other services/DALs.
 
         COMMIT TRANSACTION;
-        SELECT \'管理员处理退货请求成功。\' AS Result;
+        SELECT N\'退货请求已由管理员处理。\' AS Result;
     END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0

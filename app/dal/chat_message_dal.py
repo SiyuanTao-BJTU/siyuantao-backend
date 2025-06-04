@@ -1,4 +1,5 @@
 import uuid # 用于类型提示，尽管通常以字符串形式传递UUID
+from typing import Optional, Tuple, List, Dict, Any # Added Optional, Tuple, List, Dict, Any for clarity
 
 class ChatMessageDAL:
     def __init__(self, db_pool):
@@ -62,20 +63,47 @@ class ChatMessageDAL:
             if conn:
                 self.db_pool.putconn(conn)
 
-    def send_message(self, sender_id: str, receiver_id: str, product_id: str, content: str) -> dict | None:
+    def send_message(self, sender_id: str, receiver_id: str, product_id: str, content: str, client_message_id: Optional[str] = None) -> Tuple[uuid.UUID, bool]:
         """
         调用 sp_SendMessage 存储过程发送消息。
-        :param sender_id: 发送者ID。
-        :param receiver_id: 接收者ID。
-        :param product_id: 商品ID。
-        :param content: 消息内容。
-        :return: 包含结果的字典，例如 {'Result': '消息发送成功', 'AffectedRows': 1}，或在错误时为 None。
+        现在还处理 client_message_id 用于幂等性，并返回 (message_id, is_newly_created)。
         """
-        return self._execute_procedure(
-            "sp_SendMessage",
-            (sender_id, receiver_id, product_id, content),
-            fetch_mode="one"
+        params = (
+            sender_id, 
+            receiver_id, 
+            product_id, 
+            content,
+            client_message_id #  None会被正确处理为SQL NULL by pyodbc/most drivers
         )
+        try:
+            result_dict = self._execute_procedure(
+                procedure_name="sp_SendMessage",
+                params=params,
+                fetch_mode="one",
+                expect_results=True
+            )
+
+            if not result_dict or 'MessageIdOutput' not in result_dict or 'IsNewlyCreated' not in result_dict:
+                # Log this error appropriately
+                print(f"DAL Error: sp_SendMessage did not return expected columns. Result: {result_dict}")
+                raise Exception("Failed to send message due to unexpected database response.") # Or a custom DAL exception
+
+            message_id_str = result_dict['MessageIdOutput']
+            is_newly_created_val = result_dict['IsNewlyCreated']
+
+            # Convert to appropriate types
+            message_id = uuid.UUID(str(message_id_str)) # Ensure it's a UUID object
+            is_newly_created = bool(is_newly_created_val) # Convert bit/int to boolean
+            
+            return message_id, is_newly_created
+
+        except Exception as e:
+            # Log error e
+            print(f"Error in ChatMessageDAL.send_message: {e}")
+            # Consider re-raising a DAL-specific exception or a more generic one if not already handled by _execute_procedure
+            # For now, assume _execute_procedure might raise, or we raise a new one here.
+            # If _execute_procedure re-raises, this catch might be for additional logging/wrapping.
+            raise # Re-raise the caught exception or a wrapped one
 
     def get_user_conversations(self, user_id: str) -> list[dict] | None:
         """

@@ -1,13 +1,17 @@
 import uuid
 from typing import Optional, Tuple, List, Dict, Any
+import logging # Added for logging
 
-# Assuming ChatMessageDAL is accessible via this path
-# Adjust if your project structure is different
-try:
-    from ..dal.chat_message_dal import ChatMessageDAL
-except ImportError: # Handle cases where the script might be run directly or in different contexts
-    from backend.src.modules.chat.dal.chat_message_dal import ChatMessageDAL
+# Updated and simplified import for ChatMessageDAL
+from app.dal.chat_message_dal import ChatMessageDAL
 
+# Configure basic logging
+# In a real app, this would be configured in a central place (e.g., main.py or logging config file)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# TODO: Move this to a configuration file/setting
+MAX_CHAT_MESSAGE_LENGTH = 1000
 
 class ChatServiceError(Exception):
     """Base exception for ChatService errors."""
@@ -48,17 +52,14 @@ class ChatService:
         """
         self.dal = chat_message_dal
 
-    def send_message(self, sender_id: str, receiver_id: str, product_id: str, content: str) -> Dict[str, Any]:
+    def send_message(self, sender_id: str, receiver_id: str, product_id: str, content: str, client_message_id: Optional[str] = None) -> Tuple[str, bool]:
         """
         Sends a chat message after validating inputs.
-        :param sender_id: The ID of the message sender.
-        :param receiver_id: The ID of the message receiver.
-        :param product_id: The ID of the product related to the chat.
-        :param content: The message content.
-        :return: A dictionary with the result of the send operation.
-        :raises InvalidInputError: If any input is invalid.
-        :raises ChatOperationError: If the DAL operation fails.
+        Returns a tuple (message_id, is_newly_created).
         """
+        logger.info(
+            f"Attempting to send message from {sender_id} to {receiver_id} for product {product_id} (ClientMsgId: {client_message_id})"
+        )
         field_errors = {}
         if not is_valid_uuid(sender_id):
             field_errors["sender_id"] = "Invalid sender ID format."
@@ -66,26 +67,42 @@ class ChatService:
             field_errors["receiver_id"] = "Invalid receiver ID format."
         if not is_valid_uuid(product_id):
             field_errors["product_id"] = "Invalid product ID format."
+        
+        if client_message_id and not is_valid_uuid(client_message_id):
+            field_errors["client_message_id"] = "Invalid client message ID format."
+
         if not content or not content.strip():
             field_errors["content"] = "Message content cannot be empty."
-        elif len(content) > 4000: # Example max length
-            field_errors["content"] = "Message content exceeds maximum length."
+        elif len(content) > MAX_CHAT_MESSAGE_LENGTH:
+            field_errors["content"] = f"Message content exceeds maximum length of {MAX_CHAT_MESSAGE_LENGTH} characters."
         
         if sender_id == receiver_id:
             field_errors["receiver_id"] = "Sender and receiver cannot be the same."
 
         if field_errors:
+            logger.warning(f"Validation failed for sending message: {field_errors}")
             raise InvalidInputError("Validation failed for sending message.", field_errors=field_errors)
 
         try:
-            result = self.dal.send_message(sender_id, receiver_id, product_id, content)
-            if not result or result.get('AffectedRows', 0) == 0: # Example check based on DAL output
-                 # The SP RAISERROR should ideally be caught by DAL and re-raised
-                 # This is a fallback or if SP returns a status
-                raise ChatOperationError("Failed to send message. DAL returned no affected rows or error.")
-            return result
-        except Exception as e: # Catch specific DAL exceptions if defined, or general ones
-            # Log the original exception e
+            message_id, is_newly_created = self.dal.send_message(
+                sender_id, receiver_id, product_id, content, client_message_id
+            )
+            
+            logger.info(
+                f"Message sent successfully. MessageID: {message_id}, NewlyCreated: {is_newly_created}"
+            )
+            
+            # TODO: Trigger asynchronous notification to receiver_id about new message message_id
+            # Example: background_tasks.add_task(notify_user, receiver_id, message_id)
+            
+            return str(message_id), is_newly_created
+        
+        except ChatOperationError as e:
+            logger.error(f"ChatOperationError in send_message: {e.message}", exc_info=True)
+            raise # Re-raise specific, already categorised errors
+        except Exception as e: 
+            logger.error(f"Unexpected error in send_message: {str(e)}", exc_info=True)
+            # Wrap unexpected DAL errors or other issues into a ChatOperationError
             raise ChatOperationError(f"An error occurred while sending the message: {str(e)}")
 
 

@@ -2,8 +2,8 @@ import unittest
 from unittest.mock import MagicMock
 import uuid
 
-# Adjust the import path based on your project structure
-from backend.src.modules.return_request.dal.return_request_dal import ReturnRequestDAL
+# Corrected import path
+from app.dal.return_request_dal import ReturnRequestDAL
 
 class TestReturnRequestDAL(unittest.TestCase):
 
@@ -23,26 +23,32 @@ class TestReturnRequestDAL(unittest.TestCase):
         self.seller_id = str(uuid.uuid4())
         self.admin_id = str(uuid.uuid4())
         self.return_request_id = str(uuid.uuid4())
-        self.return_reason = "Item defective"
-        self.audit_idea = "Approved by seller"
+        
+        # Updated and new fields for tests
+        self.request_reason_detail = "Item is defective and smells weird."
+        self.return_reason_code = "DEFECTIVE"
+        self.seller_notes_agree = "Agreed. Please return the item."
+        self.seller_notes_disagree = "Rejected. User damaged item."
+        self.intervention_reason = "Seller is unresponsive after rejection."
+        self.resolution_action = "REFUND_APPROVED"
+        self.admin_notes = "Admin approved full refund after reviewing evidence."
 
     def tearDown(self):
         pass
 
     def test_create_return_request_success(self):
-        # Note: The SP's SCOPE_IDENTITY() for NewReturnRequestID with UNIQUEIDENTIFIER
-        # might return NULL. The test reflects what the DAL would get if the SP returned a value.
-        # A more robust SP would generate UUID, insert, then SELECT it.
-        mock_new_return_id = str(uuid.uuid4()) # Assume SP provides this if it worked ideally
-        expected_result = {'Result': '退货请求已成功创建。', 'NewReturnRequestID': mock_new_return_id}
-        self.mock_cursor.description = [('Result',), ('NewReturnRequestID',)]
-        self.mock_cursor.fetchone.return_value = ('退货请求已成功创建。', mock_new_return_id)
+        mock_new_return_id = str(uuid.uuid4())
+        expected_result = {'NewReturnRequestID': mock_new_return_id, 'Result': '退货请求已成功创建。'}
+        self.mock_cursor.description = [('NewReturnRequestID',), ('Result',)] # Order matters for zip
+        self.mock_cursor.fetchone.return_value = (mock_new_return_id, '退货请求已成功创建。')
 
-        result = self.dal.create_return_request(self.order_id, self.buyer_id, self.return_reason)
+        result = self.dal.create_return_request(
+            self.order_id, self.buyer_id, self.request_reason_detail, self.return_reason_code
+        )
 
         self.mock_cursor.execute.assert_called_once_with(
-            "EXEC sp_CreateReturnRequest ?, ?, ?",
-            (self.order_id, self.buyer_id, self.return_reason)
+            "EXEC sp_CreateReturnRequest ?, ?, ?, ?", # Expect 4 placeholders
+            (self.order_id, self.buyer_id, self.request_reason_detail, self.return_reason_code)
         )
         self.assertEqual(result, expected_result)
         self.mock_cursor.close.assert_called_once()
@@ -51,7 +57,9 @@ class TestReturnRequestDAL(unittest.TestCase):
     def test_create_return_request_db_error(self):
         self.mock_cursor.execute.side_effect = Exception("DB Error")
         with self.assertRaisesRegex(Exception, "DB Error"):
-            self.dal.create_return_request(self.order_id, self.buyer_id, self.return_reason)
+            self.dal.create_return_request(
+                self.order_id, self.buyer_id, self.request_reason_detail, self.return_reason_code
+            )
         self.mock_db_pool.putconn.assert_called_once_with(self.mock_conn)
 
     def test_handle_return_request_success_agree(self):
@@ -60,25 +68,45 @@ class TestReturnRequestDAL(unittest.TestCase):
         self.mock_cursor.fetchone.return_value = ('退货请求处理成功。',)
         is_agree = True
 
-        result = self.dal.handle_return_request(self.return_request_id, self.seller_id, is_agree, self.audit_idea)
+        result = self.dal.handle_return_request(
+            self.return_request_id, self.seller_id, is_agree, self.seller_notes_agree
+        )
 
         self.mock_cursor.execute.assert_called_once_with(
             "EXEC sp_HandleReturnRequest ?, ?, ?, ?",
-            (self.return_request_id, self.seller_id, is_agree, self.audit_idea) # pyodbc handles bool to 1/0
+            (self.return_request_id, self.seller_id, is_agree, self.seller_notes_agree)
         )
         self.assertEqual(result, expected_result)
 
-    def test_handle_return_request_success_disagree(self):
-        expected_result = {'Result': '退货请求处理成功。'} # SP result message might be generic
+    def test_handle_return_request_success_disagree_with_notes(self):
+        expected_result = {'Result': '退货请求处理成功。'} 
         self.mock_cursor.description = [('Result',)]
         self.mock_cursor.fetchone.return_value = ('退货请求处理成功。',)
         is_agree = False
 
-        result = self.dal.handle_return_request(self.return_request_id, self.seller_id, is_agree, "Rejected by seller")
+        result = self.dal.handle_return_request(
+            self.return_request_id, self.seller_id, is_agree, self.seller_notes_disagree
+        )
 
         self.mock_cursor.execute.assert_called_once_with(
             "EXEC sp_HandleReturnRequest ?, ?, ?, ?",
-            (self.return_request_id, self.seller_id, is_agree, "Rejected by seller")
+            (self.return_request_id, self.seller_id, is_agree, self.seller_notes_disagree)
+        )
+        self.assertEqual(result, expected_result)
+
+    def test_handle_return_request_success_agree_no_notes(self):
+        expected_result = {'Result': '退货请求处理成功。'} 
+        self.mock_cursor.description = [('Result',)]
+        self.mock_cursor.fetchone.return_value = ('退货请求处理成功。',)
+        is_agree = True
+
+        result = self.dal.handle_return_request(
+            self.return_request_id, self.seller_id, is_agree, None # Test with None notes
+        )
+
+        self.mock_cursor.execute.assert_called_once_with(
+            "EXEC sp_HandleReturnRequest ?, ?, ?, ?",
+            (self.return_request_id, self.seller_id, is_agree, None)
         )
         self.assertEqual(result, expected_result)
 
@@ -87,26 +115,43 @@ class TestReturnRequestDAL(unittest.TestCase):
         self.mock_cursor.description = [('Result',)]
         self.mock_cursor.fetchone.return_value = ('申请管理员介入成功。',)
 
-        result = self.dal.buyer_request_intervention(self.return_request_id, self.buyer_id)
+        result = self.dal.buyer_request_intervention(
+            self.return_request_id, self.buyer_id, self.intervention_reason
+        )
 
         self.mock_cursor.execute.assert_called_once_with(
-            "EXEC sp_BuyerRequestIntervention ?, ?",
-            (self.return_request_id, self.buyer_id)
+            "EXEC sp_BuyerRequestIntervention ?, ?, ?", # Expect 3 placeholders
+            (self.return_request_id, self.buyer_id, self.intervention_reason)
         )
         self.assertEqual(result, expected_result)
 
     def test_admin_resolve_return_request_success(self):
-        new_status = "管理员同意退款"
-        admin_audit_idea = "Admin approved refund."
-        expected_result = {'Result': '管理员处理退货请求成功。'}
+        expected_result = {'Result': '退货请求已由管理员处理。'} # Updated SP message
         self.mock_cursor.description = [('Result',)]
-        self.mock_cursor.fetchone.return_value = ('管理员处理退货请求成功。',)
+        self.mock_cursor.fetchone.return_value = ('退货请求已由管理员处理。',)
 
-        result = self.dal.admin_resolve_return_request(self.return_request_id, self.admin_id, new_status, admin_audit_idea)
+        result = self.dal.admin_resolve_return_request(
+            self.return_request_id, self.admin_id, self.resolution_action, self.admin_notes
+        )
 
         self.mock_cursor.execute.assert_called_once_with(
-            "EXEC sp_AdminResolveReturnRequest ?, ?, ?, ?",
-            (self.return_request_id, self.admin_id, new_status, admin_audit_idea)
+            "EXEC sp_AdminResolveReturnRequest ?, ?, ?, ?", # Expect 4 placeholders
+            (self.return_request_id, self.admin_id, self.resolution_action, self.admin_notes)
+        )
+        self.assertEqual(result, expected_result)
+    
+    def test_admin_resolve_return_request_success_no_notes(self):
+        expected_result = {'Result': '退货请求已由管理员处理。'}
+        self.mock_cursor.description = [('Result',)]
+        self.mock_cursor.fetchone.return_value = ('退货请求已由管理员处理。',)
+
+        result = self.dal.admin_resolve_return_request(
+            self.return_request_id, self.admin_id, self.resolution_action, None # Test with None notes
+        )
+
+        self.mock_cursor.execute.assert_called_once_with(
+            "EXEC sp_AdminResolveReturnRequest ?, ?, ?, ?", 
+            (self.return_request_id, self.admin_id, self.resolution_action, None)
         )
         self.assertEqual(result, expected_result)
 

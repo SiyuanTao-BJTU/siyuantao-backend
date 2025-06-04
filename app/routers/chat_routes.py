@@ -2,6 +2,7 @@ import uuid
 from typing import List, Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body, status
+from fastapi.responses import JSONResponse # Added for dynamic status codes
 from pydantic import BaseModel, Field
 
 # Placeholder for ChatService - In a real app, this would be properly injected
@@ -10,7 +11,7 @@ from pydantic import BaseModel, Field
 # Actual instantiation/injection would happen in main.py or similar.
 from unittest.mock import MagicMock
 # Assuming ChatService and its exceptions are defined in chat_service.py
-from backend.src.modules.chat.services.chat_service import (
+from app.services.chat_service import (
     ChatService,
     InvalidInputError,
     ChatOperationError,
@@ -36,6 +37,11 @@ class MessageCreateRequest(BaseModel):
     receiver_id: str = Field(..., description="ID of the message receiver.")
     product_id: str = Field(..., description="ID of the product related to the chat.")
     content: str = Field(..., min_length=1, max_length=4000, description="Message content.")
+    client_message_id: Optional[str] = Field(None, description="Client-generated unique ID for idempotency.")
+
+class SendMessageResponse(BaseModel):
+    message_id: str = Field(..., description="The ID of the sent or existing message.")
+    is_newly_created: bool = Field(..., description="True if the message was newly created, False if it already existed (idempotent hit).")
 
 class MessageResponse(BaseModel):
     # Define based on the actual output of sp_SendMessage as mapped by DAL/Service
@@ -144,22 +150,30 @@ def handle_chat_service_exception(e: ChatServiceError):
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.post("/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/messages", response_model=SendMessageResponse) # Removed status_code, updated response_model
 async def send_chat_message(
     payload: MessageCreateRequest,
     current_user: User = Depends(get_current_user),
-    chat_service: ChatService = Depends(get_chat_service) # Use dependency injection
+    chat_service: ChatService = Depends(get_chat_service)
 ):
     """Send a new chat message."""
     try:
-        result = chat_service.send_message( # Use injected chat_service
+        message_id_obj, is_newly = chat_service.send_message(
             sender_id=current_user.id,
             receiver_id=payload.receiver_id,
             product_id=payload.product_id,
-            content=payload.content
+            content=payload.content,
+            client_message_id=payload.client_message_id # Pass client_message_id
         )
-        # Adapt response based on actual service output and MessageResponse model
-        return result 
+        
+        response_data = SendMessageResponse(
+            message_id=str(message_id_obj), 
+            is_newly_created=is_newly
+        )
+        
+        status_to_return = status.HTTP_201_CREATED if is_newly else status.HTTP_200_OK
+        return JSONResponse(content=response_data.model_dump(), status_code=status_to_return)
+        
     except ChatServiceError as e:
         handle_chat_service_exception(e)
     except Exception as e: # Catch-all for unexpected errors

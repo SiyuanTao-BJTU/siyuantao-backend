@@ -11,11 +11,32 @@ CREATE PROCEDURE [sp_SendMessage]
     @senderId UNIQUEIDENTIFIER,
     @receiverId UNIQUEIDENTIFIER,
     @productId UNIQUEIDENTIFIER,
-    @content NVARCHAR(MAX)
+    @content NVARCHAR(MAX),
+    @clientMessageId UNIQUEIDENTIFIER -- 新增: 客户端生成的消息ID，用于幂等性
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON; -- 遇到错误自动回滚
+
+    DECLARE @existingMessageId UNIQUEIDENTIFIER;
+    DECLARE @messageIdOutput UNIQUEIDENTIFIER;
+    DECLARE @isNewlyCreated BIT = 0;
+
+    -- 0. 幂等性检查: 如果提供了 clientMessageId，则检查是否已存在
+    IF @clientMessageId IS NOT NULL
+    BEGIN
+        SELECT @existingMessageId = MessageID
+        FROM [ChatMessage]
+        WHERE SenderID = @senderId AND ClientMessageId = @clientMessageId;
+
+        IF @existingMessageId IS NOT NULL
+        BEGIN
+            SET @messageIdOutput = @existingMessageId;
+            SET @isNewlyCreated = 0; -- 消息已存在
+            SELECT @messageIdOutput AS MessageIdOutput, @isNewlyCreated AS IsNewlyCreated;
+            RETURN;
+        END
+    END
 
     -- 1. 检查发送者和接收者是否存在
     IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @senderId)
@@ -47,6 +68,7 @@ BEGIN
         BEGIN TRANSACTION; -- 开始事务
 
         -- 3. 插入 ChatMessage 记录
+        SET @messageIdOutput = NEWID(); -- 先生成新的MessageID
         INSERT INTO [ChatMessage] (
             MessageID,
             SenderID,
@@ -56,10 +78,11 @@ BEGIN
             SendTime,
             IsRead,
             SenderVisible,
-            ReceiverVisible
+            ReceiverVisible,
+            ClientMessageId -- 新增列
         )
         VALUES (
-            NEWID(),
+            @messageIdOutput, -- 使用预生成的ID
             @senderId,
             @receiverId,
             @productId,
@@ -67,13 +90,15 @@ BEGIN
             GETDATE(),
             0, -- 新消息默认未读
             1, -- 发送者可见
-            1  -- 接收者可见
+            1,  -- 接收者可见
+            @clientMessageId -- 存储客户端消息ID
         );
+        
+        SET @isNewlyCreated = 1; -- 消息是新创建的
 
         COMMIT TRANSACTION; -- 提交事务
 
-        -- 返回成功消息（可选）
-        SELECT '消息发送成功' AS Result, @@ROWCOUNT AS AffectedRows;
+        SELECT @messageIdOutput AS MessageIdOutput, @isNewlyCreated AS IsNewlyCreated;
 
     END TRY
     BEGIN CATCH

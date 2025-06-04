@@ -2,9 +2,8 @@ import unittest
 from unittest.mock import MagicMock, patch
 import uuid
 
-# Assuming chat_message_dal.py is in backend.src.modules.chat.dal
-# Adjust the import path based on your project structure and how you run tests
-from backend.src.modules.chat.dal.chat_message_dal import ChatMessageDAL
+# Corrected import path
+from app.dal.chat_message_dal import ChatMessageDAL
 
 class TestChatMessageDAL(unittest.TestCase):
 
@@ -24,35 +23,84 @@ class TestChatMessageDAL(unittest.TestCase):
         self.product_id = str(uuid.uuid4())
         self.message_id = str(uuid.uuid4())
         self.user_id = str(uuid.uuid4())
+        self.client_message_id = str(uuid.uuid4()) # Example client message ID
 
     def tearDown(self):
         # Ensure mocks are reset if necessary, though unittest does this per test method.
         pass
 
-    def test_send_message_success(self):
-        expected_result = {'Result': '消息发送成功', 'AffectedRows': 1}
-        self.mock_cursor.description = [('Result',), ('AffectedRows',)]
-        self.mock_cursor.fetchone.return_value = ('消息发送成功', 1)
+    def test_send_message_success_newly_created(self):
+        # Expected data from SP when message is newly created
+        self.mock_cursor.description = [('MessageIdOutput',), ('IsNewlyCreated',)]
+        self.mock_cursor.fetchone.return_value = (self.message_id, 1) # 1 for True
 
         content = "Hello there!"
-        result = self.dal.send_message(self.sender_id, self.receiver_id, self.product_id, content)
+        result_message_id, result_is_newly_created = self.dal.send_message(
+            self.sender_id, self.receiver_id, self.product_id, content, self.client_message_id
+        )
 
         self.mock_db_pool.getconn.assert_called_once()
         self.mock_conn.cursor.assert_called_once()
         self.mock_cursor.execute.assert_called_once_with(
-            "EXEC sp_SendMessage ?, ?, ?, ?",
-            (self.sender_id, self.receiver_id, self.product_id, content)
+            "EXEC sp_SendMessage ?, ?, ?, ?, ?", # Expect 5 placeholders
+            (self.sender_id, self.receiver_id, self.product_id, content, self.client_message_id)
         )
-        self.assertEqual(result, expected_result)
+        self.assertEqual(result_message_id, uuid.UUID(self.message_id))
+        self.assertTrue(result_is_newly_created)
         self.mock_cursor.close.assert_called_once()
         self.mock_db_pool.putconn.assert_called_once_with(self.mock_conn)
+
+    def test_send_message_success_idempotent_hit(self):
+        # Expected data from SP when message already exists (idempotent hit)
+        self.mock_cursor.description = [('MessageIdOutput',), ('IsNewlyCreated',)]
+        self.mock_cursor.fetchone.return_value = (self.message_id, 0) # 0 for False
+
+        content = "Hello there again!" # Content might be same or different
+        existing_client_msg_id = str(uuid.uuid4())
+        result_message_id, result_is_newly_created = self.dal.send_message(
+            self.sender_id, self.receiver_id, self.product_id, content, existing_client_msg_id
+        )
+
+        self.mock_cursor.execute.assert_called_once_with(
+            "EXEC sp_SendMessage ?, ?, ?, ?, ?", 
+            (self.sender_id, self.receiver_id, self.product_id, content, existing_client_msg_id)
+        )
+        self.assertEqual(result_message_id, uuid.UUID(self.message_id))
+        self.assertFalse(result_is_newly_created)
+
+    def test_send_message_success_no_client_id(self):
+        # Test when client_message_id is None (SP should handle NULL)
+        self.mock_cursor.description = [('MessageIdOutput',), ('IsNewlyCreated',)]
+        # Assuming if client_message_id is NULL, it's always a new message (unless other constraints exist)
+        # For this test, let's assume it results in a new message. 
+        # The SP logic dictates: if @clientMessageId IS NULL, it proceeds to insert (so IsNewlyCreated=1)
+        self.mock_cursor.fetchone.return_value = (self.message_id, 1) 
+
+        content = "A message without client ID."
+        result_message_id, result_is_newly_created = self.dal.send_message(
+            self.sender_id, self.receiver_id, self.product_id, content, None # client_message_id is None
+        )
+
+        self.mock_cursor.execute.assert_called_once_with(
+            "EXEC sp_SendMessage ?, ?, ?, ?, ?",
+            (self.sender_id, self.receiver_id, self.product_id, content, None)
+        )
+        self.assertEqual(result_message_id, uuid.UUID(self.message_id))
+        self.assertTrue(result_is_newly_created)
+
+    def test_send_message_dal_raises_on_missing_sp_results(self):
+        self.mock_cursor.description = [('SomeOtherColumn',)] # Missing expected columns
+        self.mock_cursor.fetchone.return_value = ('some_value',)
+        content = "Test content"
+        with self.assertRaisesRegex(Exception, "Failed to send message due to unexpected database response."):
+            self.dal.send_message(self.sender_id, self.receiver_id, self.product_id, content, self.client_message_id)
 
     def test_send_message_db_error(self):
         self.mock_cursor.execute.side_effect = Exception("DB Error")
         content = "Error message"
         with self.assertRaisesRegex(Exception, "DB Error"):
-            self.dal.send_message(self.sender_id, self.receiver_id, self.product_id, content)
-        self.mock_db_pool.putconn.assert_called_once_with(self.mock_conn) # Ensure conn is released
+            self.dal.send_message(self.sender_id, self.receiver_id, self.product_id, content, self.client_message_id)
+        self.mock_db_pool.putconn.assert_called_once_with(self.mock_conn)
 
     def test_get_user_conversations_success(self):
         mock_conversation_data = [

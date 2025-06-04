@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body, status
 from pydantic import BaseModel, Field
 
 from unittest.mock import MagicMock # Keep for User model default if needed
-from backend.src.modules.return_request.services.return_request_service import (
+from app.services.return_request_service import (
     ReturnRequestService,
     InvalidInputError,
     NotFoundError,
@@ -14,10 +14,11 @@ from backend.src.modules.return_request.services.return_request_service import (
     ReturnOperationError,
     ReturnRequestServiceError
 )
-# from backend.src.modules.return_request.dal.return_request_dal import ReturnRequestDAL
-# from backend.src.modules.order.dal.order_dal import OrderDAL # Placeholder
-# from backend.src.modules.product.dal.product_dal import ProductDAL # Placeholder
+from app.dal.return_request_dal import ReturnRequestDAL
+from app.dal.order_dal import OrderDAL # Placeholder
+from app.dal.product_dal import ProductDAL # Placeholder
 # from your_db_connector import db_pool # Example
+from app.models.enums import ReturnReasonCode, AdminResolutionAction # Added Enum imports
 
 # --- Placeholder Authentication ---
 class User(BaseModel): # General User Model
@@ -56,7 +57,8 @@ async def get_requesting_user_for_details(request: Request) -> User:
 # --- Pydantic Models ---
 class ReturnRequestCreateRequest(BaseModel):
     order_id: str = Field(..., description="ID of the order for which return is requested.")
-    return_reason: str = Field(..., min_length=10, max_length=2000, description="Reason for the return request.")
+    request_reason_detail: str = Field(..., min_length=10, max_length=2000, description="Detailed reason for the return request.")
+    return_reason_code: ReturnReasonCode = Field(..., description="Standardized reason code for the return.")
 
 class ReturnRequestCreateResponse(BaseModel):
     Result: str
@@ -68,48 +70,51 @@ class HTTPErrorDetail(BaseModel):
 
 class ReturnRequestHandleRequest(BaseModel):
     is_agree: bool = Field(..., description="Whether the seller agrees to the return.")
-    audit_idea: Optional[str] = Field(None, max_length=1000, description="Seller's comments or reasons for the decision.")
+    audit_idea: Optional[str] = Field(None, max_length=1000, description="Seller\'s comments or reasons for the decision.")
 
 class ReturnRequestHandleResponse(BaseModel):
     Result: str
 
-class ReturnRequestInterveneResponse(BaseModel): # No request body needed usually
+# New model for buyer intervention request body
+class ReturnRequestInterventionBody(BaseModel):
+    intervention_reason: str = Field(..., min_length=10, max_length=1000, description="Reason for requesting admin intervention.")
+
+class ReturnRequestInterveneResponse(BaseModel): 
     Result: str
 
 class AdminReturnResolveRequest(BaseModel):
-    new_status: str = Field(..., description="The new status set by the admin (e.g., '管理员同意退款', '管理员拒绝退款').")
-    audit_idea: Optional[str] = Field(None, max_length=1000, description="Admin's comments or reasons for the resolution.")
+    resolution_action: AdminResolutionAction = Field(..., description="The resolution action taken by the admin.")
+    admin_notes: Optional[str] = Field(None, max_length=1000, description="Admin\'s comments or reasons for the resolution.")
 
 class AdminReturnResolveResponse(BaseModel):
     Result: str
 
 class ReturnRequestDetailResponse(BaseModel):
-    # Define based on sp_GetReturnRequestById as mapped by DAL/Service
-    # Example fields, adjust according to actual SP output structure
     退货请求ID: str
     订单ID: str
     买家ID: str
-    卖家ID: str # Added for completeness, might be in SP
+    卖家ID: str 
     商品ID: Optional[str] = None
-    创建时间: Any # Or datetime
+    创建时间: Any 
     状态: str
-    退货原因: str
-    处理意见: Optional[str] = None
-    处理时间: Optional[Any] = None # Or datetime
-    管理员介入时间: Optional[Any] = None # Or datetime
-    管理员处理意见: Optional[str] = None
-    管理员处理时间: Optional[Any] = None # Or datetime
-    # ... other fields from your SP/DAL
+    退货原因详细说明: str # Renamed from 退货原因 to map to RequestReason (detail text)
+    退货原因代码: Optional[ReturnReasonCode] = None # Added
+    卖家处理意见: Optional[str] = None # Maps to SellerNotes
+    卖家处理时间: Optional[Any] = None # Maps to SellerActionDate
+    # 管理员介入时间: Optional[Any] = None # This specific field might not exist; ResolutionDetails will have timestamps
+    管理员处理意见: Optional[str] = None # Maps to AdminNotes
+    管理员处理时间: Optional[Any] = None # Maps to ResolutionDate / AdminActionDate
+    处理日志: Optional[str] = Field(None, alias="resolution_details", description="Detailed log of actions.") # Added ResolutionDetails
 
-class ReturnRequestListItemResponse(BaseModel): # For lists
-    # Similar to DetailResponse but potentially fewer fields
+class ReturnRequestListItemResponse(BaseModel): 
     退货请求ID: str
     订单ID: str
-    商品名称: Optional[str] = None # Example, join if needed
+    商品名称: Optional[str] = None 
     创建时间: Any
     状态: str
-    买家ID: str # for /me endpoint context
-    卖家ID: str # for /me endpoint context (if user is seller)
+    买家ID: str 
+    卖家ID: str 
+    退货原因代码: Optional[ReturnReasonCode] = None # Added
 
 
 # --- Router Definition ---
@@ -151,7 +156,8 @@ async def create_new_return_request(
         result = service.create_return_request(
             order_id=payload.order_id,
             buyer_id=current_user.id,
-            return_reason=payload.return_reason
+            request_reason_detail=payload.request_reason_detail,
+            return_reason_code=payload.return_reason_code
         )
         return result
     except ReturnRequestServiceError as e:
@@ -167,8 +173,6 @@ async def handle_seller_return_request(
     service: ReturnRequestService = Depends(get_return_request_service)
 ):
     """Handle a return request (by seller: agree or disagree)."""
-    print(f"DEBUG handle_seller_return_request: service.handle_return_request is {service.handle_return_request}")
-    print(f"DEBUG handle_seller_return_request: service.handle_return_request.side_effect is {getattr(service.handle_return_request, 'side_effect', 'NOT SET')}")
     try:
         result = service.handle_return_request(
             return_request_id=request_id,
@@ -185,6 +189,7 @@ async def handle_seller_return_request(
 @router.put("/{request_id}/intervene", response_model=Union[ReturnRequestInterveneResponse, HTTPErrorDetail])
 async def buyer_requests_admin_intervention(
     request_id: str = Path(..., description="ID of the return request for intervention."),
+    payload: ReturnRequestInterventionBody = Body(...),
     current_user: User = Depends(get_current_user_dep),
     service: ReturnRequestService = Depends(get_return_request_service)
 ):
@@ -192,7 +197,8 @@ async def buyer_requests_admin_intervention(
     try:
         result = service.buyer_request_intervention(
             return_request_id=request_id,
-            buyer_id=current_user.id
+            buyer_id=current_user.id,
+            intervention_reason=payload.intervention_reason
         )
         return result
     except ReturnRequestServiceError as e:
@@ -232,8 +238,8 @@ async def admin_resolves_intervened_request(
         result = service.admin_resolve_return_request(
             return_request_id=request_id,
             admin_id=current_admin_user.id,
-            new_status=payload.new_status,
-            audit_idea=payload.audit_idea
+            resolution_action=payload.resolution_action,
+            admin_notes=payload.admin_notes
         )
         return result
     except ReturnRequestServiceError as e:
@@ -265,8 +271,6 @@ async def get_my_return_requests(
     service: ReturnRequestService = Depends(get_return_request_service)
 ):
     """Get all return requests for the current user (buyer or seller)."""
-    print(f"DEBUG get_my_return_requests: service.get_user_return_requests is {service.get_user_return_requests}")
-    print(f"DEBUG get_my_return_requests: service.get_user_return_requests.side_effect is {getattr(service.get_user_return_requests, 'side_effect', 'NOT SET')}")
     try:
         # Assuming the service method can distinguish or handle calls for both buyer and seller based on user_id
         return service.get_user_return_requests(user_id=current_user.id)

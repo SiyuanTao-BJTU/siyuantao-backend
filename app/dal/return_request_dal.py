@@ -1,4 +1,5 @@
 import uuid # 用于类型提示
+from typing import Optional, List, Dict, Any # Ensure Optional is imported
 
 class ReturnRequestDAL:
     def __init__(self, db_pool):
@@ -23,6 +24,7 @@ class ReturnRequestDAL:
             cursor = conn.cursor()
             placeholders = ", ".join(["?"] * len(params))
             sql = f"EXEC {procedure_name} {placeholders}"
+            # print(f"Executing SQL: {sql} with params: {params}") # Debugging line
             cursor.execute(sql, params)
 
             if not expect_results or fetch_mode == "none":
@@ -48,32 +50,23 @@ class ReturnRequestDAL:
             if conn:
                 self.db_pool.putconn(conn)
 
-    def create_return_request(self, order_id: str, buyer_id: str, return_reason: str) -> dict | None:
+    def create_return_request(self, order_id: str, buyer_id: str, 
+                              request_reason_detail: str, return_reason_code: str
+                             ) -> Dict[str, Any] | None:
         """
         调用 sp_CreateReturnRequest 存储过程创建退货请求。
-        :param order_id: 订单ID。
-        :param buyer_id: 买家ID。
-        :param return_reason: 退货原因。
-        :return: 包含结果的字典或 None。
         """
-        # 注意：sp_CreateReturnRequest 返回的 NewReturnRequestID 依赖于 SCOPE_IDENTITY()，
-        # 这对于 UNIQUEIDENTIFIER 主键通常返回 NULL。
-        # 存储过程应修改为先生成 NEWID()，插入，然后 SELECT 这个已知的ID。
-        # 当前DAL实现将按原样返回SP的结果。
         return self._execute_procedure(
             "sp_CreateReturnRequest",
-            (order_id, buyer_id, return_reason),
+            (order_id, buyer_id, request_reason_detail, return_reason_code),
             fetch_mode="one"
         )
 
-    def handle_return_request(self, return_request_id: str, seller_id: str, is_agree: bool, audit_idea: str) -> dict | None:
+    def handle_return_request(self, return_request_id: str, seller_id: str, 
+                              is_agree: bool, audit_idea: Optional[str]
+                             ) -> Dict[str, Any] | None:
         """
         调用 sp_HandleReturnRequest 存储过程处理退货请求。
-        :param return_request_id: 退货请求ID。
-        :param seller_id: 卖家ID。
-        :param is_agree: 是否同意 (True/False)。
-        :param audit_idea: 处理意见。
-        :return: 包含结果的字典或 None。
         """
         return self._execute_procedure(
             "sp_HandleReturnRequest",
@@ -81,35 +74,31 @@ class ReturnRequestDAL:
             fetch_mode="one"
         )
 
-    def buyer_request_intervention(self, return_request_id: str, buyer_id: str) -> dict | None:
+    def buyer_request_intervention(self, return_request_id: str, buyer_id: str, 
+                                   intervention_reason: str
+                                  ) -> Dict[str, Any] | None:
         """
         调用 sp_BuyerRequestIntervention 存储过程，买家申请介入。
-        :param return_request_id: 退货请求ID。
-        :param buyer_id: 买家ID。
-        :return: 包含结果的字典或 None。
         """
         return self._execute_procedure(
             "sp_BuyerRequestIntervention",
-            (return_request_id, buyer_id),
+            (return_request_id, buyer_id, intervention_reason),
             fetch_mode="one"
         )
 
-    def admin_resolve_return_request(self, return_request_id: str, admin_id: str, new_status: str, audit_idea: str) -> dict | None:
+    def admin_resolve_return_request(self, return_request_id: str, admin_id: str, 
+                                     resolution_action: str, admin_notes: Optional[str]
+                                    ) -> Dict[str, Any] | None:
         """
         调用 sp_AdminResolveReturnRequest 存储过程，管理员处理退货请求。
-        :param return_request_id: 退货请求ID。
-        :param admin_id: 管理员ID。
-        :param new_status: 管理员设定的新状态。
-        :param audit_idea: 管理员处理意见。
-        :return: 包含结果的字典或 None。
         """
         return self._execute_procedure(
             "sp_AdminResolveReturnRequest",
-            (return_request_id, admin_id, new_status, audit_idea),
+            (return_request_id, admin_id, resolution_action, admin_notes),
             fetch_mode="one"
         )
 
-    def get_return_request_by_id(self, return_request_id: str) -> dict | None:
+    def get_return_request_by_id(self, return_request_id: str) -> Dict[str, Any] | None:
         """
         调用 sp_GetReturnRequestById 存储过程获取退货请求详情。
         :param return_request_id: 退货请求ID。
