@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body, status, Request
 from pydantic import BaseModel, Field
@@ -62,6 +62,10 @@ class ReturnRequestCreateResponse(BaseModel):
     Result: str
     NewReturnRequestID: str
 
+# Standard Error Response Model
+class HTTPErrorDetail(BaseModel):
+    detail: Any # Can be str or dict or list of dicts for validation errors
+
 class ReturnRequestHandleRequest(BaseModel):
     is_agree: bool = Field(..., description="Whether the seller agrees to the return.")
     audit_idea: Optional[str] = Field(None, max_length=1000, description="Seller's comments or reasons for the decision.")
@@ -123,9 +127,7 @@ def get_return_request_service() -> ReturnRequestService:
     return MagicMock()
 
 def handle_return_service_exception(e: ReturnRequestServiceError):
-    print(f"Debugging handle_return_service_exception: Received exception type: {type(e)}, value: {e}") # DEBUG
     if isinstance(e, InvalidInputError):
-        print(f"Debugging InvalidInputError: field_errors: {e.field_errors}, message: {e.message}") # DEBUG
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=e.field_errors or e.message)
     if isinstance(e, NotFoundError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message)
@@ -138,7 +140,7 @@ def handle_return_service_exception(e: ReturnRequestServiceError):
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.post("", response_model=ReturnRequestCreateResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=Union[ReturnRequestCreateResponse, HTTPErrorDetail], status_code=status.HTTP_201_CREATED)
 async def create_new_return_request(
     payload: ReturnRequestCreateRequest,
     current_user: User = Depends(get_current_user_dep),
@@ -157,14 +159,16 @@ async def create_new_return_request(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {str(e)}")
 
-@router.put("/{request_id}/handle", response_model=ReturnRequestHandleResponse)
+@router.put("/{request_id}/handle", response_model=Union[ReturnRequestHandleResponse, HTTPErrorDetail])
 async def handle_seller_return_request(
-    request_id: str = Path(..., description="ID of the return request to handle."),
+    request_id: str = Path(..., description="The ID of the return request to handle."),
     payload: ReturnRequestHandleRequest = Body(...),
-    current_user: User = Depends(get_current_user_dep),
+    current_user: User = Depends(get_current_user_dep), # Seller
     service: ReturnRequestService = Depends(get_return_request_service)
 ):
-    """Seller handles a return request (agree/disagree)."""
+    """Handle a return request (by seller: agree or disagree)."""
+    print(f"DEBUG handle_seller_return_request: service.handle_return_request is {service.handle_return_request}")
+    print(f"DEBUG handle_seller_return_request: service.handle_return_request.side_effect is {getattr(service.handle_return_request, 'side_effect', 'NOT SET')}")
     try:
         result = service.handle_return_request(
             return_request_id=request_id,
@@ -178,7 +182,7 @@ async def handle_seller_return_request(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {str(e)}")
 
-@router.put("/{request_id}/intervene", response_model=ReturnRequestInterveneResponse)
+@router.put("/{request_id}/intervene", response_model=Union[ReturnRequestInterveneResponse, HTTPErrorDetail])
 async def buyer_requests_admin_intervention(
     request_id: str = Path(..., description="ID of the return request for intervention."),
     current_user: User = Depends(get_current_user_dep),
@@ -255,20 +259,17 @@ async def get_single_return_request_detail(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {str(e)}")
 
-@router.get("/me/requests", response_model=List[ReturnRequestListItemResponse]) 
+@router.get("/me/requests", response_model=Union[List[ReturnRequestListItemResponse], HTTPErrorDetail], dependencies=[Depends(get_current_user_dep)])
 async def get_my_return_requests(
-    current_user: User = Depends(get_current_user_dep),
-    service: ReturnRequestService = Depends(get_return_request_service),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100)
+    current_user: User = Depends(get_current_user_dep), # Buyer or Seller
+    service: ReturnRequestService = Depends(get_return_request_service)
 ):
-    """Get a list of the current user's return requests (as buyer or seller)."""
+    """Get all return requests for the current user (buyer or seller)."""
+    print(f"DEBUG get_my_return_requests: service.get_user_return_requests is {service.get_user_return_requests}")
+    print(f"DEBUG get_my_return_requests: service.get_user_return_requests.side_effect is {getattr(service.get_user_return_requests, 'side_effect', 'NOT SET')}")
     try:
-        return service.get_user_return_requests(
-            user_id=current_user.id,
-            page=page, 
-            page_size=page_size
-        )
+        # Assuming the service method can distinguish or handle calls for both buyer and seller based on user_id
+        return service.get_user_return_requests(user_id=current_user.id)
     except ReturnRequestServiceError as e:
         handle_return_service_exception(e)
     except Exception as e:

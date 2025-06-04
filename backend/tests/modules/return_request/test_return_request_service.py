@@ -195,16 +195,27 @@ class TestReturnRequestService(unittest.TestCase):
             self.service.get_user_return_requests("invalid-uid")
 
     def test_get_user_return_requests_dal_user_not_found_msg(self):
-        self.mock_return_request_dal.get_return_requests_by_user_id.side_effect = Exception("用户不存在")
-        with self.assertRaises(NotFoundError):
-            self.service.get_user_return_requests(self.buyer_id)
-        self.assertIn("User not found", str(self.assertRaises(NotFoundError))) # Check specific message part
+        # Simulate DAL raising a generic Exception that the service should convert
+        self.mock_return_request_dal.get_return_requests_by_user_id.side_effect = Exception("用户不存在从DAL层")
+        
+        with self.assertRaises(NotFoundError) as cm:
+            self.service.get_user_return_requests(self.buyer_id) # Removed page/page_size
+        
+        # Check if the service-level NotFoundError contains an appropriate message
+        self.assertIn("not found", str(cm.exception).lower()) # Flexible check for "not found"
 
     def test_get_user_return_requests_dal_returns_none(self):
         self.mock_return_request_dal.get_return_requests_by_user_id.return_value = None
         with self.assertRaises(ReturnOperationError) as cm:
-            self.service.get_user_return_requests(self.buyer_id)
+            self.service.get_user_return_requests(self.buyer_id) # Removed page/page_size
         self.assertIn("DAL returned None", cm.exception.message)
+
+    def test_get_user_return_requests_unexpected_dal_error(self):
+        # This test is for generic DAL errors being wrapped into ReturnOperationError
+        self.mock_return_request_dal.get_return_requests_by_user_id.side_effect = Exception("Generic Unhandled DAL Error")
+        with self.assertRaises(ReturnOperationError) as cm: 
+            self.service.get_user_return_requests(self.buyer_id) # Removed page/page_size
+        self.assertIn("dal error", str(cm.exception).lower()) # Check for a generic DAL error indication
 
 if __name__ == '__main__':
     unittest.main(argv=['first-arg-is-ignored'], exit=False) 
