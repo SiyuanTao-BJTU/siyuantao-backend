@@ -412,9 +412,9 @@ BEGIN
         ELSE IF @visibleToTarget = 'receiver'
         BEGIN
             IF @operatingUserId != @msgReceiverId
-            BEGIN
+        BEGIN
                 RAISERROR('无权修改接收者对此消息的可见性。', 16, 1);
-                IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION; RETURN;
+            IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION; RETURN;
             END
             UPDATE [ChatMessage] SET ReceiverVisible = @isVisible WHERE MessageID = @messageId;
         END
@@ -429,4 +429,61 @@ BEGIN
         THROW;
     END CATCH
 END;
+GO
+
+PRINT 'Finished creating sp_SetChatMessageVisibility';
+GO
+
+-- =============================================
+-- Indexes for ChatMessages Table
+-- =============================================
+PRINT 'Creating indexes for ChatMessages table...';
+GO
+
+-- Index to optimize fetching user conversations (supporting sp_GetUserConversations)
+-- Covers scenarios where the user is either a sender or receiver, grouped by product, and ordered by time for latest message.
+-- Including IsRead for unread count optimization.
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_ChatMessages_SenderProductReceiver_TimestampDesc' AND object_id = OBJECT_ID('dbo.ChatMessages'))
+BEGIN
+    CREATE NONCLUSTERED INDEX IX_ChatMessages_SenderProductReceiver_TimestampDesc
+    ON dbo.ChatMessages (SenderID, ProductID, ReceiverID, MessageTimestamp DESC)
+    INCLUDE (MessageContent, IsRead, MimeType, FileUrl, FileSize, FileName);
+    PRINT 'Created index IX_ChatMessages_SenderProductReceiver_TimestampDesc';
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_ChatMessages_ReceiverProductSender_TimestampDesc' AND object_id = OBJECT_ID('dbo.ChatMessages'))
+BEGIN
+    CREATE NONCLUSTERED INDEX IX_ChatMessages_ReceiverProductSender_TimestampDesc
+    ON dbo.ChatMessages (ReceiverID, ProductID, SenderID, MessageTimestamp DESC)
+    INCLUDE (MessageContent, IsRead, MimeType, FileUrl, FileSize, FileName);
+    PRINT 'Created index IX_ChatMessages_ReceiverProductSender_TimestampDesc';
+END
+GO
+
+-- Index to optimize fetching messages between two users for a specific product (supporting sp_GetChatMessagesByProductAndUsers)
+-- Ordered by timestamp for pagination.
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_ChatMessages_ProductSenderReceiver_Timestamp' AND object_id = OBJECT_ID('dbo.ChatMessages'))
+BEGIN
+    CREATE NONCLUSTERED INDEX IX_ChatMessages_ProductSenderReceiver_Timestamp
+    ON dbo.ChatMessages (ProductID, SenderID, ReceiverID, MessageTimestamp DESC)
+    INCLUDE (MessageContent, IsRead, MimeType, FileUrl, FileSize, FileName, VisibleToSender, VisibleToReceiver);
+    PRINT 'Created index IX_ChatMessages_ProductSenderReceiver_Timestamp';
+END
+GO
+
+-- Optional: A variation for the above if the query for sp_GetChatMessagesByProductAndUsers
+-- sometimes has ReceiverID before SenderID in its predicates, though one well-structured query with OR
+-- should effectively use the IX_ChatMessages_ProductSenderReceiver_Timestamp index.
+-- However, if direct lookups with Receiver, Sender are common and performance is critical:
+-- IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_ChatMessages_ProductReceiverSender_Timestamp' AND object_id = OBJECT_ID('dbo.ChatMessages'))
+-- BEGIN
+-- CREATE NONCLUSTERED INDEX IX_ChatMessages_ProductReceiverSender_Timestamp
+-- ON dbo.ChatMessages (ProductID, ReceiverID, SenderID, MessageTimestamp DESC)
+-- INCLUDE (MessageContent, IsRead, MimeType, FileUrl, FileSize, FileName, VisibleToSender, VisibleToReceiver);
+-- PRINT 'Created index IX_ChatMessages_ProductReceiverSender_Timestamp';
+-- END
+-- GO
+
+PRINT 'Finished creating indexes for ChatMessages table.';
 GO 
