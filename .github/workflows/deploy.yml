@@ -1,0 +1,92 @@
+name: Deploy Backend to Production
+
+# 当代码推送到 main 分支时触发
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 第一步：检出你的代码库
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 第二步：设置 SSH Agent，以便使用私钥连接服务器
+    - name: Setup SSH connection
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+    # 第三步：将你的服务器添加到 known_hosts，避免首次连接时的确认提示
+    - name: Add server to known_hosts
+      run: ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+    # 第四步：连接到服务器并执行部署命令
+    - name: Deploy to Server
+      run: |
+        ssh -o StrictHostKeyChecking=no root@${{ secrets.SSH_HOST }} << 'EOF'
+          set -e # 任意命令失败时立即退出
+
+          echo "Changing to project directory: ${{ secrets.PROJECT_PATH }}"
+          cd ${{ secrets.PROJECT_PATH }}
+
+          # --- 配置 Git 以信任主机 ---
+          # 确保 GitHub 的主机密钥被服务器信任
+          echo "Adding github.com to server's known_hosts..."
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null || echo "github.com already in known_hosts or failed to add, continuing..."
+
+          # --- 使用 Git 更新代码 ---
+          echo "Updating code..."
+          # 不需要设置远程URL，因为我们假设SSH代理已配置且远程已是SSH
+          # 添加安全目录配置 (如果运行用户不是目录所有者)
+          echo "Configuring safe directory..."
+          git config --global --add safe.directory ${{ secrets.PROJECT_PATH }} || echo "Safe directory already configured or failed, continuing..."
+
+          # 暂存服务器上的本地修改 (比如生产 .env 文件，防止被 pull 覆盖)
+          echo "Stashing local changes..."
+          git stash push -m "Stashed before deployment by GitHub Actions" || echo "Nothing to stash, continuing..."
+
+          # 拉取最新的代码
+          echo "Pulling latest code..."
+          git pull origin main # 或 master
+
+          # 尝试恢复暂存 (如果 pull 没有冲突)
+          echo "Applying stashed changes..."
+          git stash pop || echo "No stash to pop or conflicts occurred, continuing..."
+
+          # --- 后续步骤 ---
+          # 激活 Conda 虚拟环境
+          echo "Activating virtual environment 'backend-py312'..."
+          # 显式 source Conda 初始化脚本，确保 conda 命令可用
+          source /home/xk/miniconda3/etc/profile.d/conda.sh || { echo "Conda initialization failed or conda.sh not found. Please ensure Conda is installed and initialized for xk user on the server."; exit 1; }
+          conda activate backend-py312 || { echo "Conda environment 'backend-py312' activation failed. Please ensure the environment exists and is named correctly."; exit 1; }
+
+          # 安装/更新 Python 依赖
+          echo "Installing/Updating dependencies..."
+          pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+          # 数据库初始化/更新脚本：
+          # 根据部署指南，SQL 脚本通常手动执行。db_init.py 负责创建管理员账户等，不应每次部署都运行。
+          # 如果数据库需要自动迁移（例如使用 Alembic），则在此处添加相关命令。
+          # 目前，我们跳过这一步，假设数据库结构已就绪。
+          # 重启 ASGI 应用服务器 (Gunicorn)
+          echo "Stopping Gunicorn service 'gunicorn_siyuantao'..."
+          systemctl stop gunicorn_siyuantao || true # 允许停止失败，继续尝试杀死进程
+          echo "Attempting to free port 8000 if in use..."
+          sudo fuser -k 8000/tcp || true # 强制杀死占用8000端口的进程，如果失败则继续
+          echo "Waiting for 2 seconds to ensure port is free..."
+          sleep 2 # 给系统一点时间来释放端口
+          echo "Starting Gunicorn service 'gunicorn_siyuantao'..."
+          systemctl start gunicorn_siyuantao
+
+          # 检查服务状态 (可选)
+          echo "Checking Gunicorn service status..."
+          systemctl status gunicorn_siyuantao --no-pager || echo "Failed to get Gunicorn status, check manually."
+
+          echo "Deployment process completed!"
+        EOF
+      env:
+        CI: true 

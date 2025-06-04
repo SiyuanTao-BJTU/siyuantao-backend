@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>思源淘学生身份认证</title>
+    <style>
+        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 0; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }}
+        .email-container {{ max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); overflow: hidden; border: 1px solid #e0e0e0; }}
+        .header {{ background-color: #409eff; padding: 20px 30px; text-align: center; color: #ffffff; }}
+        .header h1 {{ margin: 0; font-size: 28px; font-weight: 600; }}
+        .content {{ padding: 30px; color: #333333; line-height: 1.6; font-size: 16px; }}
+        .content p {{ margin-bottom: 15px; }}
+        .otp-code {{ display: block; width: fit-content; margin: 25px auto; padding: 15px 25px; background-color: #ecf5ff; color: #409eff; font-size: 32px; font-weight: bold; border-radius: 6px; letter-spacing: 2px; }}
+        .footer {{ background-color: #f0f2f5; padding: 20px 30px; text-align: center; font-size: 12px; color: #909399; border-top: 1px solid #e0e0e0; }}
+        .footer p {{ margin: 5px 0; }}
+        .footer a {{ color: #409eff; text-decoration: none; }}
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h1>思源淘</h1>
+        </div>
+        <div class="content">
+            <p>亲爱的用户，</p>
+            <p>感谢您使用思源淘平台。为了完成您的学生身份验证，请使用以下验证码：</p>
+            <p class="otp-code">{otp_code}</p>
+            <p>此验证码将在 {expire_minutes} 分钟后失效。请勿与他人分享。</p>
+            <p>如果您没有请求此验证，请忽略此邮件。</p>
+            <p>此致，</p>
+            <p>思源淘团队</p>
+        </div>
+        <div class="footer">
+            <p>版权所有 © 2025 思源淘. 保留所有权利。</p>
+        </div>
+    </div>
+</body>
+</html> 
