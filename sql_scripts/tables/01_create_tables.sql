@@ -110,20 +110,36 @@ GO
 -- 6. 消息表 (ChatMessage)
 -- 记录用户之间的聊天消息，严格以产品为中心。
 CREATE TABLE [ChatMessage] (
-    [MessageID] UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(), -- 消息唯一标识符，主键
-    [SenderID] UNIQUEIDENTIFIER NOT NULL,                   -- 消息发送者用户ID，不允许为空
-    [ReceiverID] UNIQUEIDENTIFIER NOT NULL,                 -- 消息接收者用户ID，不允许为空
-    [ProductID] UNIQUEIDENTIFIER NOT NULL,                  -- 消息相关的商品ID，不允许为空（所有聊天都以产品为中心）
+    [MessageID] UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),       -- 消息唯一ID，主键
+    [ConversationIdentifier] UNIQUEIDENTIFIER NOT NULL,             -- 新增：会话标识符，由SenderID, ReceiverID, ProductID共同确定
+    [SenderID] UNIQUEIDENTIFIER NOT NULL,                           -- 发送者用户ID
+    [ReceiverID] UNIQUEIDENTIFIER NOT NULL,                         -- 接收者用户ID
+    [ProductID] UNIQUEIDENTIFIER NOT NULL,                          -- 关联的商品ID
     [SenderVisible] BIT NOT NULL DEFAULT 1,                 -- 消息在发送者端是否可见：1=可见，0=逻辑删除，默认为1
     [ReceiverVisible] BIT NOT NULL DEFAULT 1,               -- 消息在接收者端是否可见：1=可见，0=逻辑删除，默认为1
-    [Content] NVARCHAR(MAX) NOT NULL,                       -- 消息内容，不允许为空，支持大文本
-    [SendTime] DATETIME NOT NULL DEFAULT GETDATE(),         -- 消息发送时间，不允许为空，默认当前系统时间
-    [IsRead] BIT NOT NULL DEFAULT 0,                        -- 消息是否已读：0=未读，1=已读，默认为0
-    CONSTRAINT FK_ChatMessage_Sender FOREIGN KEY ([SenderID]) REFERENCES [User]([UserID]), -- 外键关联发送者用户
-    CONSTRAINT FK_ChatMessage_Receiver FOREIGN KEY ([ReceiverID]) REFERENCES [User]([UserID]), -- 外键关联接收者用户
-    CONSTRAINT FK_ChatMessage_Product FOREIGN KEY ([ProductID]) REFERENCES [Product]([ProductID]) -- 外键关联商品
-    -- 注意：如果商品被删除，关联到该商品的聊天记录如何处理？目前 ON DELETE NO ACTION，需要应用层处理。
+    [Content] NVARCHAR(MAX) NOT NULL,                               -- 消息内容
+    [SendTime] DATETIME NOT NULL DEFAULT GETDATE(),                 -- 消息发送时间
+    [IsRead] BIT NOT NULL DEFAULT 0,                                -- 消息是否已读：0=未读，1=已读
+    CONSTRAINT FK_ChatMessage_Sender FOREIGN KEY ([SenderID]) REFERENCES [User]([UserID]),
+    CONSTRAINT FK_ChatMessage_Receiver FOREIGN KEY ([ReceiverID]) REFERENCES [User]([UserID]),
+    CONSTRAINT FK_ChatMessage_Product FOREIGN KEY ([ProductID]) REFERENCES [Product]([ProductID])
 );
+GO
+
+-- 新增索引
+-- 1. 用于查询会话最新消息和未读消息的复合索引
+CREATE NONCLUSTERED INDEX IX_ChatMessage_ConversationIdentifier_SendTime_IsRead
+ON [ChatMessage] (ConversationIdentifier ASC, SendTime DESC, IsRead ASC);
+GO
+
+-- 2. 用于快速获取用户未读消息总数的索引（如果需要）
+CREATE NONCLUSTERED INDEX IX_ChatMessage_ReceiverID_IsRead_ConversationIdentifier
+ON [ChatMessage] (ReceiverID ASC, IsRead ASC, ConversationIdentifier ASC);
+GO
+
+-- 3. 用于按用户和会话过滤消息历史的索引
+CREATE NONCLUSTERED INDEX IX_ChatMessage_UserAndProduct
+ON [ChatMessage] (SenderID ASC, ReceiverID ASC, ProductID ASC, SendTime DESC);
 GO
 
 -- 7. 退货请求表 (ReturnRequest)

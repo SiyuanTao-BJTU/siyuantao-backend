@@ -3,11 +3,12 @@ from typing import Optional, Callable, Awaitable, List, Dict, Any
 from uuid import UUID
 
 from app.exceptions import DALError, NotFoundError, IntegrityError, ForbiddenError
+from app.dal.base import BaseDAL, execute_non_query
 
-class EvaluationDAL:
+class EvaluationDAL(BaseDAL):
     """Data Access Layer for Evaluations."""
 
-    def __init__(self, execute_query_func: Callable[..., Awaitable[Optional[list[tuple]] | Optional[Dict[str, Any]] | Optional[List[Dict[str, Any]]]]]) -> None:
+    def __init__(self, execute_query_func: Callable[..., Awaitable[Optional[list[tuple]] | Optional[Dict[str, Any]] | Optional[List[Dict[str, Any]]]]], execute_non_query_func: Callable[..., Awaitable[int]] = execute_non_query) -> None:
         """
         Initializes the EvaluationDAL with an asynchronous query execution function.
 
@@ -15,8 +16,9 @@ class EvaluationDAL:
             execute_query_func: An asynchronous function to execute database queries.
                                 It should accept a SQL query string and parameters, 
                                 and return an optional list of tuples (rows).
+            execute_non_query_func: An asynchronous function to execute non-query database operations.
         """
-        self._execute_query = execute_query_func
+        super().__init__(execute_query_func, execute_non_query_func)
 
     async def create_evaluation(
         self,

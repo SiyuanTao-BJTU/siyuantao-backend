@@ -25,8 +25,16 @@ except ImportError:
     uvicorn = None # Handle case where uvicorn might not be installed in this env
 
 # Import all module routes
-from app.routers import users, auth, order, evaluation, product_routes, upload_routes
-# from app.core.db import initialize_db_pool, close_db_pool # Commented out connection pool functions
+from app.routers import users, product_routes, order, evaluation, auth, upload_routes, chat_routes
+
+import sys
+import os
+
+# 这将在应用程序启动时打印 Python 解释器路径和模块搜索路径
+# 您可以在 uvicorn 启动日志中找到这些信息
+print(f"DEBUG: Python executable: {sys.executable}")
+print(f"DEBUG: sys.path: {sys.path}")
+print(f"DEBUG: Current working directory: {os.getcwd()}")
 
 # Define a comprehensive logging configuration dictionary
 LOGGING_CONFIG = {
@@ -39,62 +47,67 @@ LOGGING_CONFIG = {
             "datefmt": "%Y-%m-%d %H:%M:%S",
             "use_colors": True if uvicorn and hasattr(uvicorn.logging, "DefaultFormatter") else False,
         },
-        "access": { # Formatter for Uvicorn's access logs
+        "access": { # Formatter for access logs (HTTP requests)
             "()": "uvicorn.logging.AccessFormatter" if uvicorn and hasattr(uvicorn.logging, "AccessFormatter") else "logging.Formatter",
-            "fmt": '%(levelprefix)s %(asctime)s | %(name)s | %(client_addr)s - "%(request_line)s" %(status_code)s',
+            "fmt": '%(levelprefix)s %(asctime)s | %(client_addr)s | "%(request_line)s" %(status_code)s',
             "datefmt": "%Y-%m-%d %H:%M:%S",
             "use_colors": True if uvicorn and hasattr(uvicorn.logging, "AccessFormatter") else False,
         },
     },
     "handlers": {
-        "default": { # Handler for general logs (e.g., to stderr)
+        "default": {
             "formatter": "default",
             "class": "logging.StreamHandler",
-            "stream": "ext://sys.stderr", # Directs to standard error stream
+            "stream": "ext://sys.stderr", # Direct output to stderr
         },
-        # Add a file handler if you need logs written to a file in production
-        # "file": {
-        #     "formatter": "default",
-        #     "class": "logging.FileHandler",
-        #     "filename": "app.log",
-        #     "encoding": "utf-8",
-        # },
-        "access": { # Handler for access logs (e.g., to stdout)
+        "access": {
             "formatter": "access",
             "class": "logging.StreamHandler",
-            "stream": "ext://sys.stdout", # Directs to standard output stream
+            "stream": "ext://sys.stdout", # Direct output to stdout
         },
     },
     "loggers": {
-        "": { # Root logger: catches logs from any unconfigured logger
-            "handlers": ["default"], # Send root logs to the default handler
-            "level": "INFO", # Default level
-            "propagate": False,
-        },
-        "app": { # Logger specifically for your application code (e.g., app.main, app.routers)
-             "handlers": ["default"], # Send app logs to the default handler
-             "level": "DEBUG", # Set application logger to DEBUG for verbose output
-             "propagate": False,
-        },
-        "uvicorn.error": { # Uvicorn's internal error logger
+        "uvicorn": { # Uvicorn's root logger
+            "handlers": ["default"],
             "level": "INFO",
+            "propagate": False, # Do not propagate to root logger
+        },
+        "uvicorn.error": { # Uvicorn's error messages
+            "level": "INFO", # Keep INFO level for important server messages
             "handlers": ["default"],
             "propagate": False,
         },
-        "uvicorn.access": { # Uvicorn's HTTP access logger
-            "level": "INFO",
+        "uvicorn.access": { # Uvicorn's HTTP access logs
             "handlers": ["access"],
+            "level": "INFO", # Keep INFO level for access logs
             "propagate": False,
         },
+        "app": { # Custom application logger
+            "handlers": ["default"],
+            "level": "DEBUG", # Adjust to desired level (e.g., INFO, WARNING, ERROR)
+            "propagate": False,
+        },
+        "pyodbc": { # Add pyodbc logger
+            "handlers": ["default"],
+            "level": "WARNING", # Suppress verbose pyodbc debug info
+            "propagate": False,
+        },
+        "DBUtils": { # Add DBUtils logger
+            "handlers": ["default"],
+            "level": "WARNING", # Suppress verbose DBUtils debug info
+            "propagate": False,
+        }
+    },
+    "root": { # Fallback root logger
+        "handlers": ["default"],
+        "level": "INFO",
     },
 }
 
-# Apply the configuration as early as possible
-dictConfig(LOGGING_CONFIG)
+dictConfig(LOGGING_CONFIG) # Apply the logging configuration
 
-# Get the logger for this module (app.main)
-logger = logging.getLogger(__name__)
-
+# Get the logger for the application
+logger = logging.getLogger("app")
 
 app = FastAPI(
     title="[思源淘] 交大校园二手交易平台 API",
@@ -117,10 +130,15 @@ logger.info(f"CORS allowed origins: {allowed_origins_list}")
 # Custom Middleware to log requests
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    logger.debug(f"Middleware: Request received for path: {request.url.path}")
-    response = await call_next(request)
-    logger.debug(f"Middleware: Response status code: {response.status_code} for path: {request.url.path}")
-    return response
+    # Log incoming request
+    logger.debug(f"Incoming Request: {request.method} {request.url}")
+    try:
+        response = await call_next(request)
+        logger.debug(f"Outgoing Response: {request.method} {request.url} Status: {response.status_code}")
+        return response
+    except Exception as e:
+        logger.error(f"Request processing failed for {request.method} {request.url}: {e}", exc_info=True)
+        raise # Re-raise the exception to be caught by exception handlers
 
 # 注册 CORS 中间件 (生产环境中请限制 allow_origins)
 app.add_middleware(
@@ -140,31 +158,29 @@ app.add_exception_handler(PermissionError, forbidden_exception_handler)
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc: HTTPException):
     # 添加更明确的日志，确认此处理器被调用
-    logger.error(f"CUSTOM HTTP_EXCEPTION_HANDLER CALLED: Status {exc.status_code}, Detail: {exc.detail}", exc_info=True)
+    logger.error(f"HTTPException caught: {exc.status_code} - {exc.detail}")
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail},
-        headers=getattr(exc, "headers", None)
+        content={"message": exc.detail},
     )
 
 # Custom exception handler for Pydantic RequestValidationError
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     # Log the detailed validation errors
-    logger.error(f"RequestValidationError caught for URL: {request.url}. Detail: {exc.errors()}")
-    # Return a standard 422 response with validation details
+    logger.error(f"Validation error: {exc.errors()} for request {request.url}")
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content=jsonable_encoder({"detail": exc.errors()}),
+        content={"message": "Validation Error", "details": exc.errors()},
     )
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     # 捕获所有未被其他特定处理器捕获的通用异常
-    logger.error(f"全局异常处理器捕获到未处理异常: {type(exc).__name__} - {str(exc)}", exc_info=True)
+    logger.error(f"An unhandled exception occurred during request to {request.url}: {exc}", exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": "服务器内部发生错误，请联系管理员检查后端日志。"} # 恢复为通用信息
+        content={"message": "Internal Server Error"},
     )
 
 # 注册路由模块
@@ -174,6 +190,7 @@ app.include_router(order.router, prefix="/api/v1/orders", tags=["Orders"])
 app.include_router(evaluation.router, prefix="/api/v1/evaluations", tags=["Evaluations"])
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(upload_routes.router, prefix="/api/v1")
+app.include_router(chat_routes.router, prefix="/api/v1/chat", tags=["Chat"])
 # Mount the uploads directory to serve static files
 app.mount("/uploads", StaticFiles(directory=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'uploads'))), name="uploads")
 # ... 注册其他模块路由
@@ -185,14 +202,18 @@ async def root():
 # 您可以添加一些启动和关闭事件 (例如，初始化数据库连接池)
 @app.on_event("startup")
 async def startup_event():
-    logger.info("Application startup...")
-    # # Initialize database connection pool
-    # initialize_db_pool()
-    # logger.info("Database connection pool initialized.")
+    logger.info("Application startup event triggered.")
+    # Initialize database connection pool
+    # try:
+    #     initialize_db_pool()
+    #     logger.info("Database connection pool initialized successfully during startup.")
+    # except DALError as e:
+    #     logger.critical(f"Failed to initialize database pool during startup: {e}")
+    #     sys.exit(1) # Exit if essential service fails to start
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    logger.info("Application shutdown...")
-    # # Close database connection pool
+    logger.info("Application shutdown event triggered.")
+    # Close database connection pool
     # close_db_pool()
-    # logger.info("Database connection pool closed.")
+    # logger.info("Database connection pool closed successfully during shutdown.")

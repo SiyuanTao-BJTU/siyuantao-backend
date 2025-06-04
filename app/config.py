@@ -13,17 +13,17 @@ class Settings(BaseSettings):
     DATABASE_NAME: str
     DATABASE_UID: str
     DATABASE_PWD: str
-    ODBC_DRIVER: str = Field("ODBC Driver 17 for SQL Server", description="ODBC Driver for SQL Server") # New: ODBC Driver
-
-    # Database Connection Pool Settings
-    DATABASE_POOL_MIN: int = Field(5, description="最小连接数")
-    DATABASE_POOL_MAX_IDLE: int = Field(10, description="最大空闲连接数")
-    DATABASE_POOL_MAX_TOTAL: int = Field(20, description="最大总连接数")
-    DATABASE_POOL_BLOCKING: bool = Field(True, description="连接池满时是否阻塞等待")
+    ODBC_DRIVER: str = Field("ODBC Driver 17 for SQL Server", description="ODBC Driver for SQL Server")
 
     # Parameters for pyodbc.connect to be passed directly
-    # This allows flexibility for various connection string options
-    PYODBC_PARAMS: dict = Field(default_factory=lambda: {},
+    PYODBC_PARAMS: dict = Field(default_factory=lambda: {
+        "autocommit": False,
+        "Trusted_Connection": "no",
+        "Encrypt": "yes",
+        "TrustServerCertificate": "yes",
+        "Connection Timeout": 30,
+        "Port": 1433
+    },
         description="Additional parameters for pyodbc.connect as a dictionary")
 
     # Add JWT settings

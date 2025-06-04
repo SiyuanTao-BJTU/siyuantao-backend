@@ -6,10 +6,15 @@ from uuid import UUID
 import logging
 import asyncio # Import asyncio
 import functools # Import functools
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Callable, Awaitable
 from app.dal.transaction import transaction # Import transaction from its new home
 
 logger = logging.getLogger(__name__)
+
+class BaseDAL:
+    def __init__(self, execute_query_func: Callable[..., Awaitable[Optional[Union[Dict[str, Any], List[Dict[str, Any]], int]]]], execute_non_query_func: Callable[..., Awaitable[int]]) -> None:
+        self._execute_query = execute_query_func
+        self._execute_non_query = execute_non_query_func
 
 # --- 通用查询执行器 ---
 async def execute_query(

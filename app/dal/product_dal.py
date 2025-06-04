@@ -5,21 +5,22 @@ from uuid import UUID # Import UUID
 import logging
 
 from app.exceptions import DALError, NotFoundError, IntegrityError, PermissionError, DatabaseError # Import DatabaseError
+from app.dal.base import BaseDAL, execute_query, execute_non_query # Import BaseDAL and execute_non_query
 
 logger = logging.getLogger(__name__)
 
-class ProductDAL:
+class ProductDAL(BaseDAL):
     """
     商品数据访问层，负责与数据库进行交互，执行商品相关的CRUD操作
     """
-    def __init__(self, execute_query_func):
+    def __init__(self, execute_query_func, execute_non_query_func = execute_non_query):
         """
         初始化ProductDAL实例
         
         Args:
             execute_query_func: 通用的数据库执行函数，接收 conn, sql, params, fetchone/fetchall 等参数
         """
-        self._execute_query = execute_query_func
+        super().__init__(execute_query_func, execute_non_query_func)
 
     async def create_product(self, conn: pyodbc.Connection, owner_id: UUID, category_name: str, product_name: str, 
                             description: str, quantity: int, price: float, condition: Optional[str], image_urls: List[str]) -> UUID:
@@ -531,18 +532,18 @@ class ProductDAL:
             raise e
 
 
-class ProductImageDAL:
+class ProductImageDAL(BaseDAL):
     """
     商品图片数据访问层，负责与数据库进行交互，执行商品图片相关的操作
     """
-    def __init__(self, execute_query_func):
+    def __init__(self, execute_query_func, execute_non_query_func = execute_non_query):
         """
         初始化ProductImageDAL实例
         
         Args:
             execute_query_func: 通用的数据库执行函数
         """
-        self._execute_query = execute_query_func
+        super().__init__(execute_query_func, execute_non_query_func)
 
     async def add_product_image(self, conn: pyodbc.Connection, product_id: UUID, image_url: str, sort_order: int) -> None:
         """
@@ -649,18 +650,18 @@ class ProductImageDAL:
             raise e
 
 
-class UserFavoriteDAL:
+class UserFavoriteDAL(BaseDAL):
     """
     用户收藏数据访问层，负责与数据库进行交互，执行用户收藏相关的操作
     """
-    def __init__(self, execute_query_func):
+    def __init__(self, execute_query_func, execute_non_query_func = execute_non_query):
         """
         初始化UserFavoriteDAL实例
         
         Args:
             execute_query_func: 通用的数据库执行函数
         """
-        self._execute_query = execute_query_func
+        super().__init__(execute_query_func, execute_non_query_func)
 
     async def add_user_favorite(self, conn: pyodbc.Connection, user_id: UUID, product_id: UUID) -> None:
         """

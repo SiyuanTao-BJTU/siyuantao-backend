@@ -1,7 +1,7 @@
 # app/dal/user_dal.py
 import pyodbc
 # Keep for type hinting, but not for direct calls within methods
-from app.dal.base import execute_query
+from app.dal.base import BaseDAL, execute_query, execute_non_query
 from app.exceptions import NotFoundError, IntegrityError, DALError, ForbiddenError
 from uuid import UUID
 import logging
@@ -12,11 +12,9 @@ from typing import Optional, Dict, Any
 logger = logging.getLogger(__name__)
 
 
-class UserDAL:
-    def __init__(self, execute_query_func):  # Accept execute_query as a dependency
-        # DAL 类本身不持有连接，连接由 Service 层或 API 层的依赖注入提供
-        # Store the injected execute_query function
-        self.execute_query_func = execute_query_func
+class UserDAL(BaseDAL):
+    def __init__(self, execute_query_func, execute_non_query_func = execute_non_query):
+        super().__init__(execute_query_func, execute_non_query_func)
 
     async def get_user_by_id(self, conn: pyodbc.Connection, user_id: UUID) -> dict | None:
         """从数据库获取指定 ID 的用户（获取完整资料）。"""
@@ -26,7 +24,7 @@ class UserDAL:
         sql = "{CALL sp_GetUserProfileById(?)}"
         try:
             # Use the injected execute_query function
-            result = await self.execute_query_func(conn, sql, (user_id,), fetchone=True)
+            result = await self._execute_query(conn, sql, (user_id,), fetchone=True)
             # Add logging
             logger.debug(
                 f"DAL: sp_GetUserProfileById for ID {user_id} returned: {result}")
@@ -57,7 +55,7 @@ class UserDAL:
         logger.debug(f"DAL: Attempting to get public user profile by ID: {user_id}")
         sql = "{CALL sp_GetUserPublicProfileById(?)}"
         try:
-            result = await self.execute_query_func(conn, sql, (user_id,), fetchone=True)
+            result = await self._execute_query(conn, sql, (user_id,), fetchone=True)
             logger.debug(
                 f"DAL: sp_GetUserPublicProfileById for ID {user_id} returned: {result}"
             )
@@ -94,7 +92,7 @@ class UserDAL:
         sql = "{CALL sp_GetUserByUsernameWithPassword(?)}"
         try:
             # Use the injected execute_query function
-            result = await self.execute_query_func(conn, sql, (username,), fetchone=True)
+            result = await self._execute_query(conn, sql, (username,), fetchone=True)
             # Add logging
             logger.debug(
                 f"DAL: sp_GetUserByUsernameWithPassword for {username} returned: {result}")
@@ -125,7 +123,7 @@ class UserDAL:
             logger.debug(
                 f"DAL: Executing sp_CreateUser for {username} with phone: {phone_number}, major: {major}")
             # sp_CreateUser returns a single row with NewUserID and potentially Message/Error
-            result = await self.execute_query_func(conn, sql, (username, hashed_password, phone_number, major), fetchone=True)
+            result = await self._execute_query(conn, sql, (username, hashed_password, phone_number, major), fetchone=True)
             logger.debug(
                 f"DAL: sp_CreateUser for {username} returned raw result: {result}")
 
@@ -288,7 +286,7 @@ class UserDAL:
             logger.debug(
                 f"DAL: Executing sp_UpdateUserProfile for ID {user_id}")
             # sp_UpdateUserProfile should return the updated user data (a dict) or indicate error/not found
-            result = await self.execute_query_func(
+            result = await self._execute_query(
                 conn, sql,
                 (user_id, major, avatar_url, bio, phone_number, email, username),
                 fetchone=True
@@ -393,7 +391,7 @@ class UserDAL:
             # Add logging
             logger.debug(
                 f"DAL: Executing sp_UpdateUserPassword for ID {user_id}")
-            result = await self.execute_query_func(conn, sql, (user_id, hashed_password), fetchone=True)
+            result = await self._execute_query(conn, sql, (user_id, hashed_password), fetchone=True)
             # Add logging
             logger.debug(
                 f"DAL: sp_UpdateUserPassword for ID {user_id} returned: {result}")
@@ -452,7 +450,7 @@ class UserDAL:
             logger.debug(
                 f"DAL: Executing sp_GetUserPasswordHashById for ID {user_id}")
             # SP returns a single row with the Password hash or an error message
-            result = await self.execute_query_func(conn, sql, (user_id,), fetchone=True)
+            result = await self._execute_query(conn, sql, (user_id,), fetchone=True)
             # Add logging
             logger.debug(
                 f"DAL: sp_GetUserPasswordHashById for ID {user_id} returned: {result}")
@@ -511,7 +509,7 @@ class UserDAL:
         try:
             # Use the injected execute_query function
             # sp_DeleteUser returns a single row result containing OperationResultCode and Debug_Message.
-            result_data = await self.execute_query_func(conn, "{CALL sp_DeleteUser(?)}", (user_id,), fetchone=True)
+            result_data = await self._execute_query(conn, "{CALL sp_DeleteUser(?)}", (user_id,), fetchone=True)
 
             logger.debug(
                 f"DAL: sp_DeleteUser for user {user_id} returned: {result_data}")
@@ -599,7 +597,7 @@ class UserDAL:
         sql = "{CALL sp_GetSystemNotificationsByUserId(?)}"
         try:
             # Use the injected execute_query function
-            result = await self.execute_query_func(conn, sql, (user_id,), fetchall=True)
+            result = await self._execute_query(conn, sql, (user_id,), fetchall=True)
             logger.debug(f"DAL: sp_GetSystemNotificationsByUserId for user {user_id} returned: {result}")
 
             if result and isinstance(result, list):
@@ -630,7 +628,7 @@ class UserDAL:
         sql = "{CALL sp_MarkNotificationAsRead(?, ?)}"
         try:
             # Use the injected execute_query function. SP returns a single row result.
-            result = await self.execute_query_func(conn, sql, (notification_id, user_id), fetchone=True)
+            result = await self._execute_query(conn, sql, (notification_id, user_id), fetchone=True)
             logger.debug(f"DAL: sp_MarkNotificationAsRead for notification {notification_id}, user {user_id} returned: {result}")
 
             if result and isinstance(result, dict):
@@ -676,7 +674,7 @@ class UserDAL:
         sql = "{CALL sp_SetChatMessageVisibility(?, ?, ?, ?)}"
         try:
             # Use the injected execute_query function. SP returns a single row result.
-            result = await self.execute_query_func(conn, sql, (message_id, user_id, visible_to, is_visible), fetchone=True)
+            result = await self._execute_query(conn, sql, (message_id, user_id, visible_to, is_visible), fetchone=True)
             logger.debug(f"DAL: sp_SetChatMessageVisibility for message {message_id}, user {user_id} returned: {result}")
 
             if result and isinstance(result, dict):
@@ -721,7 +719,7 @@ class UserDAL:
         sql = "{CALL sp_ChangeUserStatus(?, ?, ?)}"
         try:
             # Use the injected execute_query function. SP returns a single row result.
-            result = await self.execute_query_func(conn, sql, (user_id, new_status, admin_id), fetchone=True)
+            result = await self._execute_query(conn, sql, (user_id, new_status, admin_id), fetchone=True)
             logger.debug(f"DAL: sp_ChangeUserStatus for user {user_id}, admin {admin_id} returned: {result}")
 
             if result and isinstance(result, dict):
@@ -767,7 +765,7 @@ class UserDAL:
         sql = "{CALL sp_AdjustUserCredit(?, ?, ?, ?)}"
         try:
             # Use the injected execute_query function. SP returns a single row result.
-            result = await self.execute_query_func(conn, sql, (user_id, credit_adjustment, admin_id, reason), fetchone=True)
+            result = await self._execute_query(conn, sql, (user_id, credit_adjustment, admin_id, reason), fetchone=True)
             logger.debug(f"DAL: sp_AdjustUserCredit for user {user_id}, admin {admin_id} returned: {result}")
 
             if result and isinstance(result, dict):
@@ -818,7 +816,7 @@ class UserDAL:
         logger.debug(f"DAL: Attempting to get all users by admin {admin_id}")
         sql = "{CALL sp_GetAllUsers(?)}"
         try:
-            results = await self.execute_query_func(conn, sql, (admin_id,), fetchall=True)
+            results = await self._execute_query(conn, sql, (admin_id,), fetchall=True)
             logger.debug(f"DAL: sp_GetAllUsers returned {len(results) if results else 0} users.")
             return results
         except Exception as e:
@@ -831,7 +829,7 @@ class UserDAL:
         sql = "{CALL sp_UpdateUserStaffStatus(?, ?, ?)}"
         try:
             # sp_UpdateUserStaffStatus returns 1 for success, -1 if user not found, -2 if admin not found/not super admin
-            result = await self.execute_query_func(conn, sql, (user_id, new_is_staff, admin_id), fetchone=True)
+            result = await self._execute_query(conn, sql, (user_id, new_is_staff, admin_id), fetchone=True)
             logger.debug(f"DAL: sp_UpdateUserStaffStatus returned: {result}")
             
             # 检查存储过程是否返回成功消息
@@ -869,7 +867,7 @@ class UserDAL:
         logger.debug(f"DAL: Attempting to get user by email {email}")
         sql = "{CALL sp_GetUserByEmailWithPassword(?)}"
         try:
-            result = await self.execute_query_func(conn, sql, (email,), fetchone=True)
+            result = await self._execute_query(conn, sql, (email,), fetchone=True)
             logger.debug(f"DAL: sp_GetUserByEmailWithPassword returned: {result}")
             return result
         except Exception as e:
@@ -881,7 +879,7 @@ class UserDAL:
         logger.debug(f"DAL: Attempting to create OTP for user {user_id} with type {otp_type}")
         sql = "{CALL sp_CreateOtpForPasswordReset(?, ?, ?, ?)}"
         try:
-            result = await self.execute_query_func(conn, sql, (user_id, otp_code, expires_at, otp_type), fetchone=True)
+            result = await self._execute_query(conn, sql, (user_id, otp_code, expires_at, otp_type), fetchone=True)
             logger.debug(f"DAL: sp_CreateOtpForPasswordReset returned: {result}")
 
             if result and isinstance(result, dict):
@@ -910,7 +908,7 @@ class UserDAL:
         logger.debug(f"DAL: Attempting to get OTP details for email {email} with code {otp_code}")
         sql = "{CALL sp_GetOtpDetailsAndValidate(?, ?)}"
         try:
-            result = await self.execute_query_func(conn, sql, (email, otp_code), fetchone=True)
+            result = await self._execute_query(conn, sql, (email, otp_code), fetchone=True)
             logger.debug(f"DAL: sp_GetOtpDetailsAndValidate returned: {result}")
             
             if result and isinstance(result, dict) and 'OperationResultCode' in result and result['OperationResultCode'] == -1:
@@ -932,7 +930,7 @@ class UserDAL:
         logger.debug(f"DAL: Attempting to mark OTP {otp_id} as used")
         sql = "{CALL sp_MarkOtpAsUsed(?)}"
         try:
-            result = await self.execute_query_func(conn, sql, (otp_id,), fetchone=True)
+            result = await self._execute_query(conn, sql, (otp_id,), fetchone=True)
             logger.debug(f"DAL: sp_MarkOtpAsUsed returned: {result}")
 
             if result and isinstance(result, dict):
@@ -963,7 +961,7 @@ class UserDAL:
         sql = "{CALL sp_UpdateUserLastLoginTime(?)}"
         params = (user_id,)
         try:
-            rowcount = await self.execute_query_func(conn, sql, params, fetchone=False, fetchall=False)
+            rowcount = await self._execute_query(conn, sql, params, fetchone=False, fetchall=False)
             if rowcount == 0:
                 logger.warning(f"DAL: Update last login time for user {user_id} returned 0 rows affected, user not found.")
                 return False

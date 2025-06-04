@@ -1,6 +1,6 @@
 import pyodbc
 from typing import List, Optional, Dict, Any, Callable, Awaitable
-from app.dal.base import execute_query, execute_non_query
+from app.dal.base import BaseDAL, execute_query, execute_non_query
 from app.exceptions import DALError, NotFoundError, IntegrityError, ForbiddenError
 from uuid import UUID # 导入 UUID
 from datetime import datetime # 导入 datetime
@@ -9,12 +9,12 @@ import logging # 确保导入 logging
 
 logger = logging.getLogger(__name__) # 初始化 logger
 
-class OrdersDAL:
+class OrdersDAL(BaseDAL):
     """
     Data Access Layer for Order operations.
     Uses a generic database query execution function.
     """
-    def __init__(self, execute_query_func: Callable[..., Awaitable[Optional[List[Dict]]]]) -> None:
+    def __init__(self, execute_query_func: Callable[..., Awaitable[Optional[List[Dict]]]], execute_non_query_func: Callable[..., Awaitable[int]] = execute_non_query) -> None:
         """
         Initializes OrdersDAL instance.
         
@@ -22,8 +22,9 @@ class OrdersDAL:
             execute_query_func: A generic async function to execute database queries.
                                 It should handle both SELECT and non-SELECT queries
                                 and manage error mapping. Signature is flexible.
+            execute_non_query_func: A generic async function to execute non-query database operations.
         """
-        self._execute_query = execute_query_func # Store the generic execution function
+        super().__init__(execute_query_func, execute_non_query_func) # Call super().__init__
 
     async def create_order(
         self, 

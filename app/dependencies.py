@@ -15,11 +15,13 @@ from app.dal.user_dal import UserDAL
 from app.dal.product_dal import ProductDAL, ProductImageDAL, UserFavoriteDAL
 from app.dal.orders_dal import OrdersDAL
 from app.dal.evaluation_dal import EvaluationDAL
-from app.dal.base import execute_query
+from app.dal.base import execute_query, execute_non_query
 from app.dal.connection import get_db_connection
 from app.utils.email_sender import send_email
 from app.schemas.user_schemas import UserResponseSchema, TokenData
 from app.exceptions import NotFoundError, IntegrityError, ForbiddenError, PermissionError, DALError
+from app.services.chat_service import ChatService
+from app.dal.chat_dal import ChatDAL
 
 import logging
 logger = logging.getLogger(__name__)
@@ -27,7 +29,7 @@ logger = logging.getLogger(__name__)
 async def get_user_service() -> UserService:
     """Dependency injector for UserService, injecting UserDAL with execute_query."""
     logger.debug("Attempting to get UserService instance.")
-    user_dal_instance = UserDAL(execute_query_func=execute_query)
+    user_dal_instance = UserDAL(execute_query_func=execute_query, execute_non_query_func=execute_non_query)
     logger.debug("UserDAL instance created.")
     service = UserService(user_dal=user_dal_instance, email_sender=send_email)
     logger.debug("UserService instance created.")
@@ -36,9 +38,9 @@ async def get_user_service() -> UserService:
 async def get_product_service() -> ProductService:
     """Dependency injector for ProductService, injecting DALs with execute_query."""
     logger.debug("Attempting to get ProductService instance.")
-    product_dal_instance = ProductDAL(execute_query_func=execute_query)
-    product_image_dal_instance = ProductImageDAL(execute_query_func=execute_query)
-    user_favorite_dal_instance = UserFavoriteDAL(execute_query_func=execute_query)
+    product_dal_instance = ProductDAL(execute_query_func=execute_query, execute_non_query_func=execute_non_query)
+    product_image_dal_instance = ProductImageDAL(execute_query_func=execute_query, execute_non_query_func=execute_non_query)
+    user_favorite_dal_instance = UserFavoriteDAL(execute_query_func=execute_query, execute_non_query_func=execute_non_query)
     logger.debug("Product DAL instances created.")
     service = ProductService(
         product_dal=product_dal_instance,
@@ -51,8 +53,8 @@ async def get_product_service() -> ProductService:
 async def get_order_service() -> OrderService:
     """Dependency injector for OrderService, injecting DALs with execute_query."""
     logger.debug("Attempting to get OrderService instance.")
-    order_dal_instance = OrdersDAL(execute_query_func=execute_query)
-    product_dal_instance = ProductDAL(execute_query_func=execute_query)
+    order_dal_instance = OrdersDAL(execute_query_func=execute_query, execute_non_query_func=execute_non_query)
+    product_dal_instance = ProductDAL(execute_query_func=execute_query, execute_non_query_func=execute_non_query)
     logger.debug("Order and Product DAL instances for OrderService created.")
     service = OrderService(
         order_dal=order_dal_instance,
@@ -64,10 +66,25 @@ async def get_order_service() -> OrderService:
 async def get_evaluation_service() -> EvaluationService:
     """Dependency injector for EvaluationService, injecting EvaluationDAL with execute_query."""
     logger.debug("Attempting to get EvaluationService instance.")
-    evaluation_dal_instance = EvaluationDAL(execute_query_func=execute_query)
+    evaluation_dal_instance = EvaluationDAL(execute_query_func=execute_query, execute_non_query_func=execute_non_query)
     logger.debug("EvaluationDAL instance created.")
     service = EvaluationService(evaluation_dal=evaluation_dal_instance)
     logger.debug("EvaluationService instance created.")
+    return service
+
+async def get_chat_service() -> ChatService:
+    """Dependency injector for ChatService, injecting DALs with execute_query."""
+    logger.debug("Attempting to get ChatService instance.")
+    chat_dal_instance = ChatDAL(execute_query_func=execute_query, execute_non_query_func=execute_non_query)
+    user_dal_instance = UserDAL(execute_query_func=execute_query, execute_non_query_func=execute_non_query)
+    product_dal_instance = ProductDAL(execute_query_func=execute_query, execute_non_query_func=execute_non_query)
+    logger.debug("ChatDAL, UserDAL, and ProductDAL instances for ChatService created.")
+    service = ChatService(
+        chat_dal=chat_dal_instance,
+        user_dal=user_dal_instance,
+        product_dal=product_dal_instance
+    )
+    logger.debug("ChatService instance created.")
     return service
 
 SECRET_KEY = settings.SECRET_KEY
