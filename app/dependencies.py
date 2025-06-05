@@ -11,11 +11,13 @@ from app.services.user_service import UserService
 from app.services.product_service import ProductService
 from app.services.order_service import OrderService
 from app.services.evaluation_service import EvaluationService
+from app.services.chat_service import ChatService
 from app.dal.user_dal import UserDAL
 from app.dal.product_dal import ProductDAL, ProductImageDAL, UserFavoriteDAL
 from app.dal.orders_dal import OrdersDAL
 from app.dal.evaluation_dal import EvaluationDAL
-from app.dal.base import execute_query
+from app.dal.chat_dal import ChatDAL
+from app.dal.base import execute_query, execute_non_query
 from app.dal.connection import get_db_connection
 from app.utils.email_sender import send_email
 from app.schemas.user_schemas import UserResponseSchema, TokenData
@@ -68,6 +70,21 @@ async def get_evaluation_service() -> EvaluationService:
     logger.debug("EvaluationDAL instance created.")
     service = EvaluationService(evaluation_dal=evaluation_dal_instance)
     logger.debug("EvaluationService instance created.")
+    return service
+
+async def get_chat_service() -> ChatService:
+    """Dependency injector for ChatService, injecting ChatDAL, UserDAL, ProductDAL."""
+    logger.debug("Attempting to get ChatService instance.")
+    chat_dal_instance = ChatDAL(execute_query_func=execute_query, execute_non_query_func=execute_non_query)
+    user_dal_instance = UserDAL(execute_query_func=execute_query)
+    product_dal_instance = ProductDAL(execute_query_func=execute_query)
+    logger.debug("Chat, User, Product DAL instances for ChatService created.")
+    service = ChatService(
+        chat_dal=chat_dal_instance,
+        user_dal=user_dal_instance,
+        product_dal=product_dal_instance
+    )
+    logger.debug("ChatService instance created.")
     return service
 
 SECRET_KEY = settings.SECRET_KEY

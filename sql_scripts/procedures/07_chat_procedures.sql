@@ -3,7 +3,7 @@
  */
 
 -- sp_SendMessage: 发送消息
--- 输入: @senderId UNIQUEIDENTIFIER, @receiverId UNIQUEIDENTIFIER, @productId UNIQUEIDENTIFIER, @content NVARCHAR(MAX)
+-- 输入: @senderId UNIQUEIDENTIFIER, @receiverId UNIQUEIDENTIFIER, @productId UNIQUEIDENTIFIER, @content NVARCHAR(MAX), @conversationIdentifier UNIQUEIDENTIFIER
 -- 逻辑: 检查发送者和接收者是否存在，检查商品是否存在。插入 ChatMessage 记录。
 DROP PROCEDURE IF EXISTS [sp_SendMessage];
 GO
@@ -11,7 +11,8 @@ CREATE PROCEDURE [sp_SendMessage]
     @senderId UNIQUEIDENTIFIER,
     @receiverId UNIQUEIDENTIFIER,
     @productId UNIQUEIDENTIFIER,
-    @content NVARCHAR(MAX)
+    @content NVARCHAR(MAX),
+    @conversationIdentifier UNIQUEIDENTIFIER
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -23,7 +24,7 @@ BEGIN
         RAISERROR('发送者用户不存在。', 16, 1);
         RETURN;
     END
-     IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @receiverId)
+    IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @receiverId)
     BEGIN
         RAISERROR('接收者用户不存在。', 16, 1);
         RETURN;
@@ -37,7 +38,7 @@ BEGIN
     END
 
     -- 检查内容是否为空 (控制流 IF)
-     IF @content IS NULL OR LTRIM(RTRIM(@content)) = ''
+    IF @content IS NULL OR LTRIM(RTRIM(@content)) = ''
     BEGIN
         RAISERROR('消息内容不能为空。', 16, 1);
         RETURN;
@@ -46,9 +47,12 @@ BEGIN
     BEGIN TRY
         BEGIN TRANSACTION; -- 开始事务
 
+        DECLARE @messageId UNIQUEIDENTIFIER = NEWID();
+
         -- 3. 插入 ChatMessage 记录 (SQL语句3 - INSERT)
         INSERT INTO [ChatMessage] (
             MessageID,
+            ConversationIdentifier,
             SenderID,
             ReceiverID,
             ProductID,
@@ -59,7 +63,8 @@ BEGIN
             ReceiverVisible
         )
         VALUES (
-            NEWID(),
+            @messageId,
+            @conversationIdentifier,
             @senderId,
             @receiverId,
             @productId,
@@ -73,7 +78,7 @@ BEGIN
         COMMIT TRANSACTION; -- 提交事务
 
         -- 返回成功消息（可选）(SQL语句4 - SELECT, 面向UI)
-        SELECT '消息发送成功' AS Result, NEWID() AS NewMessageID; -- 返回新消息ID
+        SELECT '消息发送成功' AS Result, @messageId AS NewMessageID; -- 返回新消息ID
 
     END TRY
     BEGIN CATCH
@@ -287,4 +292,4 @@ BEGIN
         THROW; -- 重新抛出捕获的错误
     END CATCH
 END;
-GO 
+GO

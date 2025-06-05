@@ -25,7 +25,7 @@ except ImportError:
     uvicorn = None # Handle case where uvicorn might not be installed in this env
 
 # Import all module routes
-from app.routers import users, auth, order, evaluation, product_routes, upload_routes
+from app.routers import users, auth, order, evaluation, product_routes, upload_routes, chat_routes
 # from app.core.db import initialize_db_pool, close_db_pool # Commented out connection pool functions
 
 # Define a comprehensive logging configuration dictionary
@@ -174,6 +174,7 @@ app.include_router(order.router, prefix="/api/v1/orders", tags=["Orders"])
 app.include_router(evaluation.router, prefix="/api/v1/evaluations", tags=["Evaluations"])
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(upload_routes.router, prefix="/api/v1")
+app.include_router(chat_routes.router, prefix="/api/v1/chat", tags=["Chat"])
 # Mount the uploads directory to serve static files
 app.mount("/uploads", StaticFiles(directory=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'uploads'))), name="uploads")
 # ... 注册其他模块路由
