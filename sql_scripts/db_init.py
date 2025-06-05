@@ -339,90 +339,80 @@ def execute_sql_file(conn, file_path, continue_on_error=False):
 def create_admin_users(conn):
     """
     为开发者创建管理员账户。
+    Returns:
+        dict: A dictionary mapping admin usernames to their UserIDs (UUIDs).
     """
     logger.info("--- 开始创建开发者管理员账户 ---")
     cursor = conn.cursor()
-
-    # Explicitly clear the User table before inserting initial admin users
-    # This ensures a clean state and avoids conflicts with existing data, especially NULL email entries
-    # The database dropping at the start of init_database.py ensures a clean state, so this explicit clear is redundant and causes issues.
-
-    admin_users = [
-        {"username": "pxk", "email": "23301127@bjtu.edu.cn", "major": "软件工程", "phone": "13800000001","avatar_url": "/uploads/10f7ab7a-95d2-4476-b2d2-9d31f2c7850e.jpg"},
-        {"username": "cyq", "email": "23301003@bjtu.edu.cn", "major": "计算机科学与技术", "phone": "13800000002"},
-        {"username": "cy", "email": "23301002@bjtu.edu.cn", "major": "计算机科学与技术", "phone": "13800000003"},
-        {"username": "ssc", "email": "23301011@bjtu.edu.cn", "major": "软件工程", "phone": "13800000004"},
-        {"username": "zsq", "email": "23301027@bjtu.edu.cn", "major": "人工智能", "phone": "13800000005"},
+    
+    admin_users_data = [
+        {"username": "siyuantao", "email": "siyuantao@bjtu.edu.cn", "major": "软件工程", "phone": "13800000001","avatar_url": "/uploads/user_siyuantao.jpg"}, # Updated AvatarUrl
+        {"username": "cyq", "email": "23301003@bjtu.edu.cn", "major": "计算机科学与技术", "phone": "13800000002","avatar_url": "/uploads/user_cyq.jpg"}, # Added AvatarUrl
+        {"username": "cy", "email": "23301002@bjtu.edu.cn", "major": "计算机科学与技术", "phone": "13800000003","avatar_url": "/uploads/user_cy.jpg"}, # Added AvatarUrl
+        {"username": "ssc", "email": "23301011@bjtu.edu.cn", "major": "软件工程", "phone": "13800000004","avatar_url": "/uploads/user_ssc.jpg"}, # Added AvatarUrl
+        {"username": "zsq", "email": "23301027@bjtu.edu.cn", "major": "人工智能", "phone": "13800000005","avatar_url": "/uploads/user_zsq.jpg"}, # Added AvatarUrl
     ]
-    # You might need to fetch or define get_password_hash here if not globally available
-    # Assuming hash_password is defined in this script as it is below
-    # from app.utils.auth import get_password_hash 
-
-    for user_data in admin_users:
+    
+    created_admin_ids = {} # To store created IDs
+    
+    for user_data in admin_users_data:
         try:
-            # Refined Check: Check if user already exists by username or specific non-null email
-            check_query = "SELECT COUNT(1) FROM [User] WHERE UserName = ?"
+            check_query = "SELECT UserID FROM [User] WHERE UserName = ?" # Change to select UserID if exists
             check_params = (user_data['username'],)
-
-            if user_data.get('email'): # Only add email check if email is provided and not None
-                check_query += " OR Email = ?"
-                check_params += (user_data['email'],)
-
             cursor.execute(check_query, check_params)
-            if cursor.fetchone()[0] == 0:
-                logger.info(f"  创建用户: {user_data['username']} ({user_data.get('email', '无邮箱')})") # Log email presence
+            existing_user_id = cursor.fetchone()
+            
+            if existing_user_id:
+                user_id_from_db = uuid.UUID(existing_user_id[0])
+                logger.info(f"  用户 {user_data['username']} ({user_data.get('email', '无邮箱')}) 已存在，跳过创建. UserID: {user_id_from_db}")
+                created_admin_ids[user_data['username']] = user_id_from_db
+            else:
+                logger.info(f"  创建用户: {user_data['username']} ({user_data.get('email', '无邮箱')})")
 
-                # Determine IsStaff and IsSuperAdmin status
-                is_staff_value = 1  # Set all users in admin_users list as staff
-                is_super_admin_value = 0 # Default to not super admin
-
-                # Set pxk as Super Admin based on email
-                if user_data.get('email') == '23301132@bjtu.edu.cn':
+                is_staff_value = 1
+                is_super_admin_value = 0
+                if user_data.get('email') == 'siyuantao@bjtu.edu.cn':
                     is_super_admin_value = 1
 
-                hashed_password = hash_password("password123") # Use a default password
+                hashed_password = hash_password("password123")
+                new_user_id = uuid.uuid4() # Generate UUID here
 
-                # Insert the user
                 cursor.execute("""
-                    INSERT INTO [User] (UserName, Password, Email, Status, Credit, IsStaff, IsVerified, Major, PhoneNumber, AvatarUrl, JoinTime, IsSuperAdmin)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?)
+                    INSERT INTO [User] (UserID, UserName, Password, Email, Status, Credit, IsStaff, IsVerified, Major, PhoneNumber, AvatarUrl, JoinTime, IsSuperAdmin)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?)
                 """, (
+                    new_user_id, # Use the generated UUID
                     user_data['username'],
                     hashed_password,
-                    user_data.get('email'), # Pass email (can be None)
+                    user_data.get('email'),
                     'Active',
                     100,
                     is_staff_value,
-                    1, # Assume admin users are verified for simplicity in init
-                    user_data.get('major'), # Pass major (can be None)
+                    1,
+                    user_data.get('major'),
                     user_data['phone'],
                     user_data.get('avatar_url'), # 添加 AvatarUrl
                     is_super_admin_value
                 ))
-                conn.commit() # Commit after each user insertion
-                logger.info(f"  用户 {user_data['username']} 创建成功.")
-            else:
-                logger.info(f"  用户 {user_data['username']} ({user_data.get('email', '无邮箱')}) 已存在，跳过创建.")
+                conn.commit()
+                logger.info(f"  用户 {user_data['username']} 创建成功. UserID: {new_user_id}")
+                created_admin_ids[user_data['username']] = new_user_id
 
         except pyodbc.IntegrityError as e:
-             # Catch specific IntegrityError to provide more context
-             sqlstate = e.args[0]
-             error_message = e.args[1] if len(e.args) > 1 else str(e)
-             logger.error(f"  创建用户 {user_data['username']} 失败 (Integrity Error): {sqlstate} - {error_message}")
-             # You might choose to continue or break here based on desired behavior for duplicates
-             # For init script, logging and continuing might be acceptable for some duplicates
-             conn.rollback() # Rollback the failed insert transaction if not auto-rolled back
+            sqlstate = e.args[0]
+            error_message = e.args[1] if len(e.args) > 1 else str(e)
+            logger.error(f"  创建用户 {user_data['username']} 失败 (Integrity Error): {sqlstate} - {error_message}")
+            conn.rollback()
         except Exception as e:
-            logger.error(f"  创建用户 {user_data['username']} 失败: {e}")
-            # Depending on how execute is configured, a rollback might be needed here too
-            if conn: # Check if connection is valid
+            logger.error(f"  创建用户 {user_data['username']} 失败: {e}", exc_info=True)
+            if conn:
                  try:
                       conn.rollback()
                  except Exception as rb_e:
                       logger.error(f"Error during rollback: {rb_e}")
 
-
     logger.info("--- 开发者管理员账户创建完成 ---")
+    return created_admin_ids
 
 # Add this utility function for password hashing, mirroring backend's auth_service
 def hash_password(password: str) -> str:
@@ -433,7 +423,7 @@ def hash_password(password: str) -> str:
     return f"{salt.hex()}:{dk.hex()}"
 
 # Add this function for inserting sample data
-async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
+async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger, admin_user_ids: dict):
 
     logger.info("Starting to insert sample data...")
     cursor = conn.cursor()
@@ -450,13 +440,13 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             alice_id, "alice", alice_password, "Active", 95, 0, 0, 1, "计算机科学", "alice@example.com",
-            "https://images.unsplash.com/photo-1520813792240-56fc4a3765a7?q=80&w=2070&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", # 更换为真实图片链接
+            "/uploads/user_alice.jpg", # 更换为本地图片链接
             "热爱编程和二手交易的学生，喜欢分享好物。", "13800000006", datetime.now(), datetime.now()
         )
         logger.info("User Alice inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert user Alice: {e}")
-        pass
+        raise # Change pass to raise
 
     # User 2: 普通用户 - Bob
     bob_id = uuid.uuid4()
@@ -469,13 +459,13 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             bob_id, "bob", bob_password, "Active", 88, 0, 0, 0, "电子工程", "bob@example.com",
-            "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", # 更换为真实图片链接
+            "/uploads/user_bob.jpg", # 更换为本地图片链接
             "喜欢电子产品，经常出售闲置物品，乐于助人。", "13900000002", datetime.now(), datetime.now()
         )
         logger.info("User Bob inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert user Bob: {e}")
-        pass
+        raise # Change pass to raise
 
     # User 3: 普通用户 - Carol (未认证)
     carol_id = uuid.uuid4()
@@ -488,13 +478,13 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             carol_id, "carol", carol_password, "Disabled", 70, 0, 0, 0, "环境艺术", "carol@example.com",
-            "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", # 更换为真实图片链接
+            "/uploads/user_carol.jpg", # 更换为本地图片链接
             "一个新用户，还没有完成认证，目前账户已禁用。", "13700000003", datetime.now(), datetime.now()
         )
         logger.info("User Carol inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert user Carol: {e}")
-        pass
+        raise # Change pass to raise
 
     # User 4: 普通用户 - David
     david_id = uuid.uuid4()
@@ -507,13 +497,13 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             david_id, "david", david_password, "Active", 92, 0, 0, 1, "自动化", "david@example.com",
-            "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", # 更换为真实图片链接
+            "/uploads/user_david.jpg", # 更换为本地图片链接
             "一名对电子产品和开源硬件感兴趣的用户。", "13600000004", datetime.now(), datetime.now()
         )
         logger.info("User David inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert user David: {e}")
-        pass
+        raise # Change pass to raise
 
     # User 5: 普通用户 - Eve
     eve_id = uuid.uuid4()
@@ -526,13 +516,13 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             eve_id, "eve", eve_password, "Active", 90, 0, 0, 0, "物理学", "eve@example.com",
-            "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", # 更换为真实图片链接
+            "/uploads/user_eve.jpg", # 更换为本地图片链接
             "喜欢阅读和探索自然的新用户，待认证。", "13500000005", datetime.now(), datetime.now() # 添加了手机号
         )
         logger.info("User Eve inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert user Eve: {e}")
-        pass
+        raise # Change pass to raise
 
     # User 6: Tom (管理员)
     tom_id = uuid.uuid4()
@@ -545,13 +535,13 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             tom_id, "tom_admin", tom_password, "Active", 100, 1, 0, 1, "信息管理", "tom.admin@example.com",
-            "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+            "/uploads/user_tom.jpg",
             "平台管理员，负责维护社区秩序。", "13400000006", datetime.now(), datetime.now()
         )
         logger.info("User Tom (Admin) inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert user Tom (Admin): {e}")
-        pass
+        raise # Change pass to raise
 
     # User 7: Lucy (信用较低的用户)
     lucy_id = uuid.uuid4()
@@ -564,39 +554,28 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             lucy_id, "lucy_low_credit", lucy_password, "Active", 45, 0, 0, 1, "社会学", "lucy.low@example.com",
-            "https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+            "/uploads/user_lucy.jpg",
             "信用分较低，但正在努力改进。", "13300000007", datetime.now(), datetime.now()
         )
         logger.info("User Lucy inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert user Lucy: {e}")
-        pass
+        raise # Change pass to raise
 
-        # For now, let's assume `create_admin_users` has already defined and inserted `pxk`.
-    # We should get pxk's ID from the User table.
-    pxk_id = None
-    cyq_id = None
-    cy_id = None
-    ssc_id = None
-    zsq_id = None
+        # For now, let's assume `create_admin_users` has already defined and inserted `siyuaotao`.
+    # We should get siyuaotao's ID from the User table.
+    siyuaotao_id = admin_user_ids.get('siyuantao')
+    cyq_id = admin_user_ids.get('cyq')
+    cy_id = admin_user_ids.get('cy')
+    ssc_id = admin_user_ids.get('ssc')
+    zsq_id = admin_user_ids.get('zsq')
+    # If admin IDs can't be retrieved, subsequent product insertions for them will fail.
+    # This is a critical error for test data.
+    if not all([siyuaotao_id, cyq_id, cy_id, ssc_id, zsq_id]):
+        logger.error(f"Failed to retrieve all expected admin user IDs from create_admin_users: siyuaotao={siyuaotao_id}, cyq={cyq_id}, cy={cy_id}, ssc={ssc_id}, zsq={zsq_id}")
+        raise ValueError("Critical: Not all admin user IDs were successfully created or retrieved.")
 
-    try:
-        cursor.execute("SELECT UserID FROM [User] WHERE UserName = 'pxk'")
-        pxk_id = cursor.fetchone()[0]
-        cursor.execute("SELECT UserID FROM [User] WHERE UserName = 'cyq'")
-        cyq_id = cursor.fetchone()[0]
-        cursor.execute("SELECT UserID FROM [User] WHERE UserName = 'cy'")
-        cy_id = cursor.fetchone()[0]
-        cursor.execute("SELECT UserID FROM [User] WHERE UserName = 'ssc'")
-        ssc_id = cursor.fetchone()[0]
-        cursor.execute("SELECT UserID FROM [User] WHERE UserName = 'zsq'")
-        zsq_id = cursor.fetchone()[0]
-        logger.info(f"Retrieved admin IDs: pxk={pxk_id}, cyq={cyq_id}, cy={cy_id}, ssc={ssc_id}, zsq={zsq_id}")
-    except Exception as e:
-        logger.error(f"Failed to retrieve admin user IDs: {e}")
-        # If admin IDs can't be retrieved, subsequent product insertions for them will fail.
-        # This is a critical error for test data.
-        raise # Re-raise to stop execution if admin IDs are not found.
+    logger.info(f"Retrieved admin IDs: siyuaotao={siyuaotao_id}, cyq={cyq_id}, cy={cy_id}, ssc={ssc_id}, zsq={zsq_id}")
 
     # Commit users
     conn.commit()
@@ -613,12 +592,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             product1_id, alice_id, "电子产品", "二手MacBook Pro 2020", "8成新，13英寸，带原装充电器，适合学生党和轻办公。",
-            1, 6200.00, datetime.now(), "Active"
+            2, 6200.00, datetime.now(), "Active"
         )
         logger.info("Product 1 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert product 1: {e}")
-        pass
+        raise # Change pass to raise
 
     # Product 2: Bob's Camera (已存在，更新图片链接)
     product2_id = uuid.uuid4()
@@ -630,12 +609,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             product2_id, bob_id, "电子产品", "佳能EOS 80D单反相机", "入门级单反，含18-55mm套机镜头，快门数约5000，功能完好。",
-            1, 2750.00, datetime.now(), "Active"
+            2, 2750.00, datetime.now(), "Active"
         )
         logger.info("Product 2 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert product 2: {e}")
-        pass
+        raise # Change pass to raise
 
     # Product 3: Alice's Textbook (Pending Review) (已存在)
     product3_id = uuid.uuid4()
@@ -652,7 +631,7 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
         logger.info("Product 3 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert product 3: {e}")
-        pass
+        raise # Change pass to raise
 
     # Product 4: Bob's Bicycle (Sold) (已存在，改为Withdrawn)
     product4_id = uuid.uuid4()
@@ -664,12 +643,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             product4_id, bob_id, "运动户外", "捷安特ATX777山地自行车", "骑行一年，保养良好，送车锁和打气筒。", # 类别改为运动户外
-            1, 850.00, datetime.now(), "Withdrawn" # 改为 Withdrawn, 数量为1
+            2, 850.00, datetime.now(), "Withdrawn" # 改为 Withdrawn, 数量为1
         )
         logger.info("Product 4 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert product 4: {e}")
-        pass
+        raise # Change pass to raise
 
     # Product 5: David's Keyboard (Active)
     product5_id = uuid.uuid4()
@@ -681,12 +660,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             product5_id, david_id, "电子产品", "Cherry MX8.0 机械键盘", "黑色，红轴，9成新，手感极佳，带原包装。",
-            1, 700.00, datetime.now(), "Active"
+            2, 700.00, datetime.now(), "Active"
         )
         logger.info("Product 5 (Keyboard) inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert product 5: {e}")
-        pass
+        raise # Change pass to raise
 
     # Product 6: Eve's Dress (PendingReview)
     product6_id = uuid.uuid4()
@@ -698,12 +677,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             product6_id, eve_id, "服装鞋包", "夏季碎花连衣裙", "全新，M码，仅试穿，风格不合适故转让。",
-            1, 120.00, datetime.now(), "PendingReview"
+            2, 120.00, datetime.now(), "PendingReview"
         )
         logger.info("Product 6 (Dress) inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert product 6: {e}")
-        pass
+        raise # Change pass to raise
 
     # Product 7: Alice's Graphics Card (Rejected)
     product7_id = uuid.uuid4()
@@ -715,12 +694,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             product7_id, alice_id, "电子产品", "NVIDIA RTX 3070 显卡", "挖矿锻炼卡，性能不稳定，便宜出。", # 描述可能导致拒绝
-            1, 1500.00, datetime.now(), "Rejected"
+            2, 1500.00, datetime.now(), "Rejected"
         )
         logger.info("Product 7 (Graphics Card - Rejected) inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert product 7: {e}")
-        pass
+        raise # Change pass to raise
 
     # Product 8: Bob's Headphones (Sold)
     product8_id = uuid.uuid4()
@@ -737,9 +716,9 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
         logger.info("Product 8 (Headphones - Sold) inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert product 8: {e}")
-        pass
+        raise # Change pass to raise
 
-    # Product 9: David's Desk Lamp (Active, Low Quantity)
+    # Product 9: David's Desk Lamp (Active)
     product9_id = uuid.uuid4()
     logger.info(f"Inserting product 9 (Desk Lamp) for David with ID: {product9_id}")
     try:
@@ -749,12 +728,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             product9_id, david_id, "家居日用", "小米LED智能台灯Pro", "可调节亮度和色温，保护视力，几乎全新。",
-            1, 180.00, datetime.now(), "Active"
+            2, 180.00, datetime.now(), "Active"
         )
         logger.info("Product 9 (Desk Lamp) inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert product 9: {e}")
-        pass
+        raise # Change pass to raise
 
     # Product 10: Eve's Skincare Set (Withdrawn by user)
     product10_id = uuid.uuid4()
@@ -766,32 +745,32 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             product10_id, eve_id, "美妆个护", "某品牌水乳套装", "全新未拆封，朋友送的，自己用不上。",
-            1, 280.00, datetime.now(), "Withdrawn"
+            2, 280.00, datetime.now(), "Withdrawn"
         )
         logger.info("Product 10 (Skincare Set - Withdrawn) inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert product 10: {e}")
-        pass
+        raise # Change pass to raise
 
         # --- New Products for Admin Users ---
 
-    # Product 11: Pxk's Drawing Tablet (Active)
+    # Product 11: siyuaotao's Drawing Tablet (Active)
     product11_id = uuid.uuid4()
-    if pxk_id:
-        logger.info(f"Inserting product 11 (Drawing Tablet) for Pxk with ID: {product11_id}")
+    if siyuaotao_id:
+        logger.info(f"Inserting product 11 (Drawing Tablet) for siyuaotao with ID: {product11_id}")
         try:
             cursor.execute(
                 """
                 INSERT INTO [Product] (ProductID, OwnerID, CategoryName, ProductName, Description, Quantity, Price, PostTime, Status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                product11_id, pxk_id, "电子产品", "Wacom Intuos 绘图板", "9成新，很少使用，适合设计专业学生。",
-                1, 550.00, datetime.now(), "Active"
+                product11_id, siyuaotao_id, "电子产品", "Wacom Intuos 绘图板", "9成新，很少使用，适合设计专业学生。",
+                2, 550.00, datetime.now(), "Active"
             )
             logger.info("Product 11 (Drawing Tablet) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 11: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 12: Cyq's Sports Shoes (Active)
     product12_id = uuid.uuid4()
@@ -804,12 +783,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 product12_id, cyq_id, "服装鞋包", "Adidas UltraBoost 跑鞋", "8成新，尺码42，舒适透气，适合日常跑步。",
-                1, 380.00, datetime.now(), "Active"
+                2, 380.00, datetime.now(), "Active"
             )
             logger.info("Product 12 (Sports Shoes) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 12: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 13: Cy's Vintage Camera (PendingReview)
     product13_id = uuid.uuid4()
@@ -822,12 +801,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 product13_id, cy_id, "电子产品", "Olympus OM-1 胶片相机", "老式胶片机，功能完好，适合摄影爱好者收藏。",
-                1, 1500.00, datetime.now(), "PendingReview"
+                2, 1500.00, datetime.now(), "PendingReview"
             )
             logger.info("Product 13 (Vintage Camera) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 13: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 14: Ssc's Guitar (Active)
     product14_id = uuid.uuid4()
@@ -840,12 +819,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 product14_id, ssc_id, "乐器", "民谣吉他初学套装", "全新未拆封，送拨片和变调夹，适合新手。",
-                1, 450.00, datetime.now(), "Active"
+                2, 450.00, datetime.now(), "Active"
             )
             logger.info("Product 14 (Guitar) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 14: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 15: Zsq's AI Textbook (Active)
     product15_id = uuid.uuid4()
@@ -858,12 +837,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 product15_id, zsq_id, "书籍文具", "《机器学习》（西瓜书）", "经典机器学习教材，九成新，少量笔记。",
-                1, 99.00, datetime.now(), "Active"
+                2, 99.00, datetime.now(), "Active"
             )
             logger.info("Product 15 (AI Textbook) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 15: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 16: Tom's Smartwatch (Sold)
     product16_id = uuid.uuid4()
@@ -881,25 +860,25 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             logger.info("Product 16 (Smartwatch) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 16: {e}")
-            pass
+            raise # Change pass to raise
 
-    # Product 17: Pxk's Monitor (Active)
+    # Product 17: siyuaotao's Monitor (Active)
     product17_id = uuid.uuid4()
-    if pxk_id:
-        logger.info(f"Inserting product 17 (Monitor) for Pxk with ID: {product17_id}")
+    if siyuaotao_id:
+        logger.info(f"Inserting product 17 (Monitor) for siyuaotao with ID: {product17_id}")
         try:
             cursor.execute(
                 """
                 INSERT INTO [Product] (ProductID, OwnerID, CategoryName, ProductName, Description, Quantity, Price, PostTime, Status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                product17_id, pxk_id, "电子产品", "戴尔27英寸2K显示器", "IPS面板，色彩准确，适合设计和日常使用。",
-                1, 1500.00, datetime.now(), "Active"
+                product17_id, siyuaotao_id, "电子产品", "戴尔27英寸2K显示器", "IPS面板，色彩准确，适合设计和日常使用。",
+                2, 1500.00, datetime.now(), "Active"
             )
             logger.info("Product 17 (Monitor) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 17: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 18: Cyq's Backpack (Active)
     product18_id = uuid.uuid4()
@@ -912,12 +891,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 product18_id, cyq_id, "服装鞋包", "Herschel经典双肩包", "耐磨防水，容量大，适合学生日常通勤。",
-                1, 280.00, datetime.now(), "Active"
+                2, 280.00, datetime.now(), "Active"
             )
             logger.info("Product 18 (Backpack) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 18: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 19: Cy's Painting Set (Active)
     product19_id = uuid.uuid4()
@@ -930,12 +909,12 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 product19_id, cy_id, "文体用品", "马利牌水彩颜料套装", "全新，24色，适合水彩初学者。",
-                1, 150.00, datetime.now(), "Active"
+                2, 150.00, datetime.now(), "Active"
             )
             logger.info("Product 19 (Painting Set) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 19: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 20: Ssc's Headset (Active)
     product20_id = uuid.uuid4()
@@ -947,13 +926,13 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
                 INSERT INTO [Product] (ProductID, OwnerID, CategoryName, ProductName, Description, Quantity, Price, PostTime, Status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                product20_id, ssc_id, "影音娱乐", "HyperX Cloud Stinger 游戏耳机", "音质清晰，佩戴舒适，适合游戏玩家。",
-                1, 260.00, datetime.now(), "Active"
+                product20_id, ssc_id, "电子产品", "HyperX Cloud Stinger Core 耳机", "轻量舒适，音质清晰，适合游戏和日常使用。",
+                2, 200.00, datetime.now(), "Active"
             )
             logger.info("Product 20 (Headset) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 20: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 21: Zsq's Algorithm Book (Active)
     product21_id = uuid.uuid4()
@@ -965,31 +944,31 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
                 INSERT INTO [Product] (ProductID, OwnerID, CategoryName, ProductName, Description, Quantity, Price, PostTime, Status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                product21_id, zsq_id, "书籍文具", "《算法导论》（原书第3版）", "计算机经典教材，9成新，无笔记。",
-                1, 120.00, datetime.now(), "Active"
+                product21_id, zsq_id, "书籍文具", "《算法导论》（第3版）", "计算机科学经典教材，英文原版，9成新。",
+                2, 150.00, datetime.now(), "Active"
             )
             logger.info("Product 21 (Algorithm Book) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 21: {e}")
-            pass
+            raise # Change pass to raise
 
-    # Product 22: Pxk's Projector (Active)
+    # Product 22: siyuaotao's Projector (Active)
     product22_id = uuid.uuid4()
-    if pxk_id:
-        logger.info(f"Inserting product 22 (Projector) for Pxk with ID: {product22_id}")
+    if siyuaotao_id:
+        logger.info(f"Inserting product 22 (Projector) for siyuaotao with ID: {product22_id}")
         try:
             cursor.execute(
                 """
                 INSERT INTO [Product] (ProductID, OwnerID, CategoryName, ProductName, Description, Quantity, Price, PostTime, Status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                product22_id, pxk_id, "电子产品", "极米H3S 投影仪", "自用投影仪，流明高，画质好，带幕布。",
-                1, 3500.00, datetime.now(), "Active"
+                product22_id, siyuaotao_id, "电子产品", "迷你家用投影仪", "小巧便携，支持1080P，适合宿舍观影。",
+                2, 600.00, datetime.now(), "Active"
             )
             logger.info("Product 22 (Projector) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 22: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 23: Cyq's Dumbbells (Active)
     product23_id = uuid.uuid4()
@@ -1001,13 +980,13 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
                 INSERT INTO [Product] (ProductID, OwnerID, CategoryName, ProductName, Description, Quantity, Price, PostTime, Status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                product23_id, cyq_id, "运动户外", "可调节哑铃套装", "20KG可调节哑铃一对，适合居家健身。",
-                1, 200.00, datetime.now(), "Active"
+                product23_id, cyq_id, "运动户外", "可调节哑铃套装（10kg）", "家用健身器材，方便收纳，几乎全新。",
+                2, 250.00, datetime.now(), "Active"
             )
             logger.info("Product 23 (Dumbbells) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 23: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 24: Cy's Art Easel (PendingReview)
     product24_id = uuid.uuid4()
@@ -1019,13 +998,13 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
                 INSERT INTO [Product] (ProductID, OwnerID, CategoryName, ProductName, Description, Quantity, Price, PostTime, Status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                product24_id, cy_id, "文体用品", "实木画架写生架", "8成新，可折叠，轻便易携带。",
-                1, 100.00, datetime.now(), "PendingReview"
+                product24_id, cy_id, "文体用品", "便携式画架", "铝合金材质，带收纳袋，适合户外写生。",
+                2, 180.00, datetime.now(), "PendingReview"
             )
             logger.info("Product 24 (Art Easel) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 24: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 25: Ssc's Drone (Rejected)
     product25_id = uuid.uuid4()
@@ -1037,13 +1016,13 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
                 INSERT INTO [Product] (ProductID, OwnerID, CategoryName, ProductName, Description, Quantity, Price, PostTime, Status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                product25_id, ssc_id, "电子产品", "大疆Mavic Mini 2 无人机", "坠机过，需要维修才能使用，便宜处理。",
-                1, 500.00, datetime.now(), "Rejected"
+                product25_id, ssc_id, "电子产品", "大疆Mini 2无人机（已损坏）", "摔过一次，摄像头故障，可用于零件。", # 描述可能导致拒绝
+                2, 800.00, datetime.now(), "Rejected"
             )
             logger.info("Product 25 (Drone) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 25: {e}")
-            pass
+            raise # Change pass to raise
 
     # Product 26: Zsq's Robotics Kit (Active)
     product26_id = uuid.uuid4()
@@ -1055,15 +1034,14 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
                 INSERT INTO [Product] (ProductID, OwnerID, CategoryName, ProductName, Description, Quantity, Price, PostTime, Status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                product26_id, zsq_id, "电子产品", "Arduino智能小车套件", "全新未组装，适合入门级机器人爱好者。",
-                1, 180.00, datetime.now(), "Active"
+                product26_id, zsq_id, "电子产品", "Arduino智能小车套件", "全新未组装，附赠教程，适合机器人入门学习。",
+                2, 300.00, datetime.now(), "Active"
             )
             logger.info("Product 26 (Robotics Kit) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert product 26: {e}")
-            pass
+            raise # Change pass to raise
 
-    # Commit products
     conn.commit()
     logger.info("Sample products committed.")
 
@@ -1073,281 +1051,329 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
     try:
         cursor.execute(
             """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-            uuid.uuid4(), product1_id, "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?q=80&w=1926&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+            uuid.uuid4(), product1_id, "/uploads/product1_1.jpg", 0
         )
         cursor.execute(
             """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-            uuid.uuid4(), product1_id, "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?q=80&w=2071&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 1
+            uuid.uuid4(), product1_id, "/uploads/product1_2.jpg", 1
         )
         cursor.execute(
             """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-            uuid.uuid4(), product1_id, "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?q=80&w=2070&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 2
+            uuid.uuid4(), product1_id, "/uploads/product1_3.jpg", 2
         )
         logger.info("Images for Product 1 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert images for Product 1: {e}")
-        pass
+        raise # Change pass to raise
 
     # Images for Product 2 (Camera) - (已存在, 更新URL)
     logger.info(f"Inserting images for Product 2: {product2_id}")
     try:
         cursor.execute(
             """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-            uuid.uuid4(), product2_id, "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?q=80&w=1964&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+            uuid.uuid4(), product2_id, "/uploads/product2_1.jpg", 0
         )
         cursor.execute(
             """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-            uuid.uuid4(), product2_id, "https://images.unsplash.com/photo-1505751172876-fa1923c5c528?q=80&w=2070&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 1
+            uuid.uuid4(), product2_id, "/uploads/product2_2.jpg", 1
         )
         logger.info("Images for Product 2 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert images for Product 2: {e}")
-        pass
+        raise # Change pass to raise
 
     # Images for Product 3 (Textbook)
     logger.info(f"Inserting images for Product 3: {product3_id}")
     try:
         cursor.execute(
             """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-            uuid.uuid4(), product3_id, "https://images.unsplash.com/photo-1507842217343-583bb7270b66?q=80&w=2106&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+            uuid.uuid4(), product3_id, "/uploads/product3_1.jpg", 0
         )
         logger.info("Images for Product 3 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert images for Product 3: {e}")
-        pass
+        raise # Change pass to raise
+
+    # Images for Product 4 (bicycle)
+    logger.info(f"Inserting images for Product 4: {product4_id}")
+    try:
+        cursor.execute(
+            """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
+            uuid.uuid4(), product4_id, "/uploads/product4_1.jpg", 0
+        )
+        logger.info("Images for Product 4 inserted.")
+    except pyodbc.Error as e:
+        logger.error(f"Failed to insert images for Product 4: {e}")
+        raise # Change pass to raise
 
     # Images for Product 5 (Keyboard)
     logger.info(f"Inserting images for Product 5: {product5_id}")
     try:
         cursor.execute(
             """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-            uuid.uuid4(), product5_id, "https://images.unsplash.com/photo-1601412436009-d964bd32edbc?q=80&w=1964&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+            uuid.uuid4(), product5_id, "/uploads/product5_1.jpg", 0
         )
         cursor.execute(
             """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-            uuid.uuid4(), product5_id, "https://images.unsplash.com/photo-1587829741301-dc798b83add3?q=80&w=2065&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 1
+            uuid.uuid4(), product5_id, "/uploads/product5_2.jpg", 1
         )
         logger.info("Images for Product 5 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert images for Product 5: {e}")
-        pass
+        raise # Change pass to raise
 
     # Images for Product 6 (Dress)
     logger.info(f"Inserting images for Product 6: {product6_id}")
     try:
         cursor.execute(
             """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-            uuid.uuid4(), product6_id, "https://images.unsplash.com/photo-1595777457583-95e059d581b8?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+            uuid.uuid4(), product6_id, "/uploads/product6_1.jpg", 0
         )
         logger.info("Images for Product 6 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert images for Product 6: {e}")
-        pass
+        raise # Change pass to raise
+
+    # Images for Product 7 (显卡)
+    logger.info(f"Inserting images for Product 7: {product7_id}")
+    try:
+        cursor.execute(
+            """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
+            uuid.uuid4(), product7_id, "/uploads/product7_1.jpg", 0
+        )
+        logger.info("Images for Product 7 inserted.")
+    except pyodbc.Error as e:
+        logger.error(f"Failed to insert images for Product 7: {e}")
+        raise # Change pass to raise
+
+    # Images for Product 8 (Desk)
+    logger.info(f"Inserting images for Product 8: {product8_id}")
+    try:
+        cursor.execute(
+            """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
+            uuid.uuid4(), product8_id, "/uploads/product8_1.jpg", 0
+        )
+        logger.info("Images for Product 8 inserted.")
+    except pyodbc.Error as e:
+        logger.error(f"Failed to insert images for Product 8: {e}")
+        raise # Change pass to raise
         
     # Images for Product 9 (Desk Lamp)
     logger.info(f"Inserting images for Product 9: {product9_id}")
     try:
         cursor.execute(
             """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-            uuid.uuid4(), product9_id, "https://images.unsplash.com/photo-1620127682229-333804207010?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+            uuid.uuid4(), product9_id, "/uploads/product9_1.jpg", 0
         )
         logger.info("Images for Product 9 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert images for Product 9: {e}")
-        pass
+        raise # Change pass to raise
+
+    # Images for Product 10 (Desk)
+    logger.info(f"Inserting images for Product 10: {product10_id}")
+    try:
+        cursor.execute(
+            """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
+            uuid.uuid4(), product10_id, "/uploads/product10_1.jpg", 0
+        )
+        logger.info("Images for Product 10 inserted.")
+    except pyodbc.Error as e:
+        logger.error(f"Failed to insert images for Product 10: {e}")
+        raise # Change pass to raise
 
         # --- New Images for Admin Products ---
-    if product11_id: # Pxk's Drawing Tablet
+    if product11_id: # siyuaotao's Drawing Tablet
         logger.info(f"Inserting images for Product 11: {product11_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product11_id, "https://images.unsplash.com/photo-1626868019082-f5c7b3b9b4d0?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product11_id, "/uploads/product11_1.jpg", 0
             )
             logger.info("Images for Product 11 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 11: {e}")
-            pass
+            raise # Change pass to raise
 
     if product12_id: # Cyq's Sports Shoes
         logger.info(f"Inserting images for Product 12: {product12_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product12_id, "https://images.unsplash.com/photo-1549298351-d419b4b6b66a?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product12_id, "/uploads/product12_1.jpg", 0
             )
             logger.info("Images for Product 12 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 12: {e}")
-            pass
+            raise # Change pass to raise
 
     if product13_id: # Cy's Vintage Camera
         logger.info(f"Inserting images for Product 13: {product13_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product13_id, "https://images.unsplash.com/photo-1510127267154-1502f689e4c3?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product13_id, "/uploads/product13_1.jpg", 0
             )
             logger.info("Images for Product 13 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 13: {e}")
-            pass
+            raise # Change pass to raise
 
     if product14_id: # Ssc's Guitar
         logger.info(f"Inserting images for Product 14: {product14_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product14_id, "https://images.unsplash.com/photo-1547035541-f7614f107f97?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product14_id, "/uploads/product14_1.jpg", 0
             )
             logger.info("Images for Product 14 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 14: {e}")
-            pass
+            raise # Change pass to raise
 
     if product15_id: # Zsq's AI Textbook
         logger.info(f"Inserting images for Product 15: {product15_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product15_id, "https://images.unsplash.com/photo-1533519846377-16075c328d6c?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product15_id, "/uploads/product15_1.jpg", 0
             )
             logger.info("Images for Product 15 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 15: {e}")
-            pass
+            raise # Change pass to raise
             
     if product16_id: # Tom's Smartwatch
         logger.info(f"Inserting images for Product 16: {product16_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product16_id, "https://images.unsplash.com/photo-1579586382025-a74070a96931?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product16_id, "/uploads/product16_1.jpg", 0
             )
             logger.info("Images for Product 16 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 16: {e}")
-            pass
+            raise # Change pass to raise
 
-    if product17_id: # Pxk's Monitor
+    if product17_id: # siyuaotao's Monitor
         logger.info(f"Inserting images for Product 17: {product17_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product17_id, "https://images.unsplash.com/photo-1582234057863-fd9e061b4d08?q=80&w=2070&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product17_id, "/uploads/product17_1.jpg", 0
             )
             logger.info("Images for Product 17 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 17: {e}")
-            pass
+            raise # Change pass to raise
 
     if product18_id: # Cyq's Backpack
         logger.info(f"Inserting images for Product 18: {product18_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product18_id, "https://images.unsplash.com/photo-1558778643-987820468498?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product18_id, "/uploads/product18_1.jpg", 0
             )
             logger.info("Images for Product 18 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 18: {e}")
-            pass
+            raise # Change pass to raise
 
     if product19_id: # Cy's Painting Set
         logger.info(f"Inserting images for Product 19: {product19_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product19_id, "https://images.unsplash.com/photo-1628189679199-4d6d1d4021a8?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product19_id, "/uploads/product19_1.jpg", 0
             )
             logger.info("Images for Product 19 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 19: {e}")
-            pass
+            raise # Change pass to raise
 
     if product20_id: # Ssc's Headset
         logger.info(f"Inserting images for Product 20: {product20_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product20_id, "https://images.unsplash.com/photo-1546435552-32b0a1f9d1b0?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product20_id, "/uploads/product20_1.jpg", 0
             )
             logger.info("Images for Product 20 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 20: {e}")
-            pass
+            raise # Change pass to raise
 
     if product21_id: # Zsq's Algorithm Book
         logger.info(f"Inserting images for Product 21: {product21_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product21_id, "https://images.unsplash.com/photo-1544716278-ca5e3f4abd87?q=80&w=1974&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product21_id, "/uploads/product21_1.jpg", 0
             )
             logger.info("Images for Product 21 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 21: {e}")
-            pass
+            raise # Change pass to raise
 
-    if product22_id: # Pxk's Projector
+    if product22_id: # siyuaotao's Projector
         logger.info(f"Inserting images for Product 22: {product22_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product22_id, "https://images.unsplash.com/photo-1629237277884-2a149a46f6f9?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product22_id, "/uploads/product22_1.jpg", 0
             )
             logger.info("Images for Product 22 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 22: {e}")
-            pass
+            raise # Change pass to raise
 
     if product23_id: # Cyq's Dumbbells
         logger.info(f"Inserting images for Product 23: {product23_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product23_id, "https://images.unsplash.com/photo-1579213876020-f507b9a5c8e2?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product23_id, "/uploads/product23_1.jpg", 0
             )
             logger.info("Images for Product 23 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 23: {e}")
-            pass
+            raise # Change pass to raise
 
     if product24_id: # Cy's Art Easel
         logger.info(f"Inserting images for Product 24: {product24_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product24_id, "https://images.unsplash.com/photo-1582234057863-fd9e061b4d08?q=80&w=2070&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0 # Using a generic art supply image
+                uuid.uuid4(), product24_id, "/uploads/product24_1.jpg", 0 # Using a generic art supply image
             )
             logger.info("Images for Product 24 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 24: {e}")
-            pass
+            raise # Change pass to raise
 
     if product25_id: # Ssc's Drone (Rejected)
         logger.info(f"Inserting images for Product 25: {product25_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product25_id, "https://images.unsplash.com/photo-1521405903960-9372f53412a8?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product25_id, "/uploads/product25_1.jpg", 0
             )
             logger.info("Images for Product 25 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 25: {e}")
-            pass
+            raise # Change pass to raise
 
     if product26_id: # Zsq's Robotics Kit
         logger.info(f"Inserting images for Product 26: {product26_id}")
         try:
             cursor.execute(
                 """INSERT INTO [ProductImage] (ImageID, ProductID, ImageURL, SortOrder) VALUES (?, ?, ?, ?)""",
-                uuid.uuid4(), product26_id, "https://images.unsplash.com/photo-1620712959950-8b431c4f0b4d?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", 0
+                uuid.uuid4(), product26_id, "/uploads/product26_1.jpg", 0
             )
             logger.info("Images for Product 26 inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert images for Product 26: {e}")
-            pass
+            raise # Change pass to raise
 
     conn.commit()
     logger.info("Sample product images committed.")
@@ -1367,7 +1393,7 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
         logger.info("Order 1 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert Order 1: {e}")
-        pass
+        raise # Change pass to raise
 
     # Evaluation for Order 1 (Bob evaluates Alice)
     evaluation1_id = uuid.uuid4()
@@ -1383,7 +1409,7 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
         logger.info("Evaluation 1 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert Evaluation 1: {e}")
-        pass
+        raise # Change pass to raise
 
     # Order 2: Alice buys Bob's Camera (Product 2)
     order2_id = uuid.uuid4()
@@ -1394,28 +1420,29 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, UpdateTime, Status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            order2_id, bob_id, alice_id, product2_id, 1, datetime.now(), "学生活动中心", datetime.now(), datetime.now(), "ConfirmedBySeller" # Still pending completion
+            order2_id, bob_id, alice_id, product2_id, 1, datetime.now(), "学生活动中心", datetime.now(), datetime.now(), "ConfirmedBySeller"
         )
         logger.info("Order 2 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert Order 2: {e}")
-        pass
+        raise # Change pass to raise
 
     # ChatMessage 1: Alice to Bob about Camera
+    chat_alice_bob_product2_conversation_id = uuid.uuid4() # New UUID for this conversation
     chat1_id = uuid.uuid4()
     logger.info(f"Inserting ChatMessage 1 (Alice to Bob about Camera) with ID: {chat1_id}")
     try:
         cursor.execute(
             """
-            INSERT INTO [ChatMessage] (MessageID, SenderID, ReceiverID, ProductID, Content, SendTime, IsRead)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO [ChatMessage] (MessageID, ConversationIdentifier, SenderID, ReceiverID, ProductID, Content, SendTime, IsRead)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            chat1_id, alice_id, bob_id, product2_id, "您好，请问相机最低多少钱可以出？", datetime.now(), 0
+            chat1_id, chat_alice_bob_product2_conversation_id, alice_id, bob_id, product2_id, "您好，请问相机最低多少钱可以出？", datetime.now(), 0
         )
         logger.info("ChatMessage 1 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert ChatMessage 1: {e}")
-        pass
+        raise # Change pass to raise
 
     # ChatMessage 2: Bob to Alice about Camera
     chat2_id = uuid.uuid4()
@@ -1423,15 +1450,15 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
     try:
         cursor.execute(
             """
-            INSERT INTO [ChatMessage] (MessageID, SenderID, ReceiverID, ProductID, Content, SendTime, IsRead)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO [ChatMessage] (MessageID, ConversationIdentifier, SenderID, ReceiverID, ProductID, Content, SendTime, IsRead)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            chat2_id, bob_id, alice_id, product2_id, "你好，最低2700。如果真心想要可以再优惠一些。", datetime.now(), 1
+            chat2_id, chat_alice_bob_product2_conversation_id, bob_id, alice_id, product2_id, "你好，最低2700。如果真心想要可以再优惠一些。", datetime.now(), 1
         )
         logger.info("ChatMessage 2 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert ChatMessage 2: {e}")
-        pass
+        raise # Change pass to raise
 
     # Order 3: David buys Alice's Textbook (Product 3) - Pending Seller Confirmation
     order3_id = uuid.uuid4()
@@ -1447,7 +1474,7 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
         logger.info("Order 3 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert Order 3: {e}")
-        pass
+        raise # Change pass to raise
 
     # Return Request 1: Lucy requests return for a hypothetical purchase (no matching order currently, just example)
     # To make this work, Lucy needs to have bought something first.
@@ -1461,13 +1488,13 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, UpdateTime, Status, CompleteTime)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            order4_id, david_id, lucy_id, product9_id, 1, datetime.now(), "宿舍楼下", datetime.now(), datetime.now(), "Completed", datetime.now()
+            order4_id, david_id, lucy_id, product9_id, 1, datetime.now(), "宿舍楼下", datetime.now(), datetime.now(), "Completed", datetime.now() # Added CompleteTime and its parameter
         )
         logger.info("Order 4 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert Order 4: {e}")
-        pass
-    
+        raise # Change pass to raise
+
     return_request1_id = uuid.uuid4()
     logger.info(f"Inserting Return Request 1 (Lucy for Desk Lamp) with ID: {return_request1_id}")
     try:
@@ -1481,41 +1508,41 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
         logger.info("Return Request 1 inserted.")
     except pyodbc.Error as e:
         logger.error(f"Failed to insert Return Request 1: {e}")
-        pass
+        raise # Change pass to raise
 
-    # New Order: Pxk buys Cyq's Sports Shoes (Product 12)
-    order_pxk_cyq_shoes = uuid.uuid4()
-    if pxk_id and cyq_id and product12_id:
-        logger.info(f"Inserting Order (Pxk buys Cyq's Sports Shoes) with ID: {order_pxk_cyq_shoes}")
+    # New Order: siyuaotao buys Cyq's Sports Shoes (Product 12)
+    order_siyuaotao_cyq_shoes = uuid.uuid4()
+    if siyuaotao_id and cyq_id and product12_id:
+        logger.info(f"Inserting Order (siyuaotao buys Cyq's Sports Shoes) with ID: {order_siyuaotao_cyq_shoes}")
         try:
             cursor.execute(
                 """
                 INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, UpdateTime, Status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                order_pxk_cyq_shoes, cyq_id, pxk_id, product12_id, 1, datetime.now(), "学校南门", datetime.now(), datetime.now(), "Completed"
+                order_siyuaotao_cyq_shoes, cyq_id, siyuaotao_id, product12_id, 1, datetime.now(), "学校南门", datetime.now(), datetime.now(), "Completed"
             )
-            logger.info("Order (Pxk buys Cyq's Sports Shoes) inserted.")
+            logger.info("Order (siyuaotao buys Cyq's Sports Shoes) inserted.")
         except pyodbc.Error as e:
-            logger.error(f"Failed to insert Order (Pxk buys Cyq's Sports Shoes): {e}")
-            pass
+            logger.error(f"Failed to insert Order (siyuaotao buys Cyq's Sports Shoes): {e}")
+            raise # Change pass to raise
 
-    # New Evaluation: Pxk evaluates Cyq for Sports Shoes
-    eval_pxk_cyq_shoes = uuid.uuid4()
-    if pxk_id and cyq_id and order_pxk_cyq_shoes:
-        logger.info(f"Inserting Evaluation (Pxk evaluates Cyq) with ID: {eval_pxk_cyq_shoes}")
+    # New Evaluation: siyuaotao evaluates Cyq for Sports Shoes
+    eval_siyuaotao_cyq_shoes = uuid.uuid4()
+    if siyuaotao_id and cyq_id and order_siyuaotao_cyq_shoes:
+        logger.info(f"Inserting Evaluation (siyuaotao evaluates Cyq) with ID: {eval_siyuaotao_cyq_shoes}")
         try:
             cursor.execute(
                 """
                 INSERT INTO [Evaluation] (EvaluationID, OrderID, Rating, Content, CreateTime)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                eval_pxk_cyq_shoes, order_pxk_cyq_shoes, 5, "鞋子很新，描述准确，卖家回复及时，好评！", datetime.now()
+                eval_siyuaotao_cyq_shoes, order_siyuaotao_cyq_shoes, 5, "鞋子很新，描述准确，卖家回复及时，好评！", datetime.now()
             )
-            logger.info("Evaluation (Pxk evaluates Cyq) inserted.")
+            logger.info("Evaluation (siyuaotao evaluates Cyq) inserted.")
         except pyodbc.Error as e:
-            logger.error(f"Failed to insert Evaluation (Pxk evaluates Cyq): {e}")
-            pass
+            logger.error(f"Failed to insert Evaluation (siyuaotao evaluates Cyq): {e}")
+            raise # Change pass to raise
 
     # New Order: Cy buys Ssc's Guitar (Product 14) - Pending Confirmation
     order_cy_ssc_guitar = uuid.uuid4()
@@ -1532,58 +1559,59 @@ async def insert_sample_data(conn: pyodbc.Connection, logger: logging.Logger):
             logger.info("Order (Cy buys Ssc's Guitar) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert Order (Cy buys Ssc's Guitar): {e}")
-            pass
+            raise # Change pass to raise
 
     # New Chat: Cy to Ssc about Guitar
+    chat_cy_ssc_product14_conversation_id = uuid.uuid4() # New UUID for this conversation
     chat_cy_ssc_guitar = uuid.uuid4()
     if cy_id and ssc_id and product14_id:
         logger.info(f"Inserting Chat (Cy to Ssc about Guitar) with ID: {chat_cy_ssc_guitar}")
         try:
             cursor.execute(
                 """
-                INSERT INTO [ChatMessage] (MessageID, SenderID, ReceiverID, ProductID, Content, SendTime, IsRead)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO [ChatMessage] (MessageID, ConversationIdentifier, SenderID, ReceiverID, ProductID, Content, SendTime, IsRead)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                chat_cy_ssc_guitar, cy_id, ssc_id, product14_id, "您好，吉他是在校内交易吗？", datetime.now(), 0
+                chat_cy_ssc_guitar, chat_cy_ssc_product14_conversation_id, cy_id, ssc_id, product14_id, "您好，吉他是在校内交易吗？", datetime.now(), 0
             )
             logger.info("Chat (Cy to Ssc about Guitar) inserted.")
         except pyodbc.Error as e:
             logger.error(f"Failed to insert Chat (Cy to Ssc about Guitar): {e}")
-            pass
+            raise # Change pass to raise
 
-    # New Order: Zsq buys Pxk's Monitor (Product 17)
-    order_zsq_pxk_monitor = uuid.uuid4()
-    if zsq_id and pxk_id and product17_id:
-        logger.info(f"Inserting Order (Zsq buys Pxk's Monitor) with ID: {order_zsq_pxk_monitor}")
+    # New Order: Zsq buys siyuaotao's Monitor (Product 17)
+    order_zsq_siyuaotao_monitor = uuid.uuid4()
+    if zsq_id and siyuaotao_id and product17_id:
+        logger.info(f"Inserting Order (Zsq buys siyuaotao's Monitor) with ID: {order_zsq_siyuaotao_monitor}")
         try:
             cursor.execute(
                 """
                 INSERT INTO [Order] (OrderID, SellerID, BuyerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, UpdateTime, Status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                order_zsq_pxk_monitor, pxk_id, zsq_id, product17_id, 1, datetime.now(), "图书馆门口", datetime.now(), datetime.now(), "Completed"
+                order_zsq_siyuaotao_monitor, siyuaotao_id, zsq_id, product17_id, 1, datetime.now(), "图书馆门口", datetime.now(), datetime.now(), "Completed"
             )
-            logger.info("Order (Zsq buys Pxk's Monitor) inserted.")
+            logger.info("Order (Zsq buys siyuaotao's Monitor) inserted.")
         except pyodbc.Error as e:
-            logger.error(f"Failed to insert Order (Zsq buys Pxk's Monitor): {e}")
-            pass
+            logger.error(f"Failed to insert Order (Zsq buys siyuaotao's Monitor): {e}")
+            raise # Change pass to raise
 
-    # New Evaluation: Zsq evaluates Pxk for Monitor
-    eval_zsq_pxk_monitor = uuid.uuid4()
-    if zsq_id and pxk_id and order_zsq_pxk_monitor:
-        logger.info(f"Inserting Evaluation (Zsq evaluates Pxk) with ID: {eval_zsq_pxk_monitor}")
+    # New Evaluation: Zsq evaluates siyuaotao for Monitor
+    eval_zsq_siyuaotao_monitor = uuid.uuid4()
+    if zsq_id and siyuaotao_id and order_zsq_siyuaotao_monitor:
+        logger.info(f"Inserting Evaluation (Zsq evaluates siyuaotao) with ID: {eval_zsq_siyuaotao_monitor}")
         try:
             cursor.execute(
                 """
                 INSERT INTO [Evaluation] (EvaluationID, OrderID, Rating, Content, CreateTime)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                eval_zsq_pxk_monitor, order_zsq_pxk_monitor, 4, "显示器状态不错，可惜附赠的线材有点短。", datetime.now()
+                eval_zsq_siyuaotao_monitor, order_zsq_siyuaotao_monitor, 4, "显示器状态不错，可惜附赠的线材有点短。", datetime.now()
             )
-            logger.info("Evaluation (Zsq evaluates Pxk) inserted.")
+            logger.info("Evaluation (Zsq evaluates siyuaotao) inserted.")
         except pyodbc.Error as e:
-            logger.error(f"Failed to insert Evaluation (Zsq evaluates Pxk): {e}")
-            pass
+            logger.error(f"Failed to insert Evaluation (Zsq evaluates siyuaotao): {e}")
+            raise # Change pass to raise
 
     conn.commit()
     logger.info("Sample orders, evaluations, chat messages committed.")
@@ -1639,12 +1667,12 @@ async def main():
         
         # 调用函数创建管理员用户
         logger.info("开始创建管理员账户...")
-        create_admin_users(conn)
-        logger.info("管理员账户创建完成。")
+        admin_user_ids = create_admin_users(conn) # Capture the returned IDs
+        logger.info(f"管理员账户创建完成。Admin IDs: {admin_user_ids}")
 
         # 调用函数插入示例数据
         logger.info("开始插入示例数据...")
-        await insert_sample_data(conn, logger) # Call the async function
+        await insert_sample_data(conn, logger, admin_user_ids) # Pass to insert_sample_data
         logger.info("示例数据插入完成。")
 
         logger.info("数据库初始化成功！")
