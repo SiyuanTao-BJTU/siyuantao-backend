@@ -176,7 +176,7 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(upload_routes.router, prefix="/api/v1")
 app.include_router(chat_routes.router, prefix="/api/v1/chat", tags=["Chat"])
 # Mount the uploads directory to serve static files
-app.mount("/uploads", StaticFiles(directory=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'uploads'))), name="uploads")
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # ... 注册其他模块路由
 
 @app.get("/")

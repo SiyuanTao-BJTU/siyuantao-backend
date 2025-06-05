@@ -434,6 +434,10 @@ class UserDAL:
                     logger.debug(f"DAL: Password hash found for ID {user_id} (using PasswordHash key).")
                     return result['PasswordHash']
 
+                if '密码哈希' in result: # 新增：支持中文键名
+                    logger.debug(f"DAL: Password hash found for ID {user_id} (using Chinese key '密码哈希').")
+                    return result['密码哈希']
+
                 # If result is a dict but doesn't contain 'Password' and no error message, unexpected
                 # Add logging
                 logger.warning(
