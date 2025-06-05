@@ -240,36 +240,33 @@ class UserService:
 
     async def delete_user(self, conn: pyodbc.Connection, user_id: UUID) -> bool:
         """
-        Service layer function to delete a user.
+        Service layer function to soft delete a user.
+        This will update the user's email to a placeholder and set their status to 'Disabled'.
         """
-        logger.info(f"Attempting to delete user with ID: {user_id}")
+        logger.info(f"Service: Attempting to soft delete user with ID: {user_id}")
         try:
-            # Call DAL to delete user
-            logger.debug(f"Calling DAL.delete_user for user ID: {user_id}")
-            delete_success = await self.user_dal.delete_user(conn, user_id)
-            logger.debug(f"DAL.delete_user returned: {delete_success}")
+            # DAL method now handles the soft deletion directly.
+            # It returns True on success or raises NotFoundError/DALError.
+            success = await self.user_dal.delete_user(conn, user_id)
 
-            if not delete_success:
-                logger.warning(f"User deletion failed or user not found for ID: {user_id}")
-                # 根据 sp_DeleteUser 的返回码决定抛出哪种异常
-                # -1: 用户未找到
-                # -2: 存在依赖，无法删除
-                # 其他负数: 数据库错误
-                if delete_success == -1: # Assuming -1 means user not found
-                     raise NotFoundError(f"User with ID {user_id} not found for deletion.")
-                elif delete_success == -2: # Assuming -2 means dependencies exist
-                     raise IntegrityError(f"User with ID {user_id} cannot be deleted due to existing active products or orders. Please ensure all related products are sold/withdrawn and orders are completed/cancelled.")
-                else: # Other DAL errors
-                     raise DALError(f"Database error during user deletion for user ID {user_id}.")
+            if success:
+                logger.info(f"Service: User {user_id} soft deleted successfully.")
+                return True
+            else:
+                # This path should ideally not be hit if DAL raises exceptions for failures,
+                # but kept as a safeguard.
+                logger.error(f"Service: User soft deletion failed for {user_id} with unknown reason (DAL returned False).")
+                raise DALError(f"用户 {user_id} 软删除失败。")
 
-            logger.info(f"User deleted successfully: {user_id}")
-            return True
-        except (NotFoundError, IntegrityError, DALError) as e:
-            logger.error(f"Error during user deletion for ID {user_id}: {e}")
+        except NotFoundError as e:
+            logger.error(f"Service: User not found for deletion: {user_id}. Error: {e}")
+            raise e
+        except DALError as e:
+            logger.error(f"Service: Database error during user soft deletion for {user_id}. Error: {e}")
             raise e
         except Exception as e:
-            logger.error(f"Unexpected error during user deletion for ID {user_id}: {e}")
-            raise e
+            logger.error(f"Service: Unexpected error during user soft deletion for {user_id}. Error: {e}")
+            raise DALError(f"服务层发生意外错误，无法软删除用户 {user_id}。") from e
     
     async def toggle_user_staff_status(self, conn: pyodbc.Connection, target_user_id: UUID, super_admin_id: UUID) -> bool:
         """

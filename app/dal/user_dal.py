@@ -505,93 +505,54 @@ class UserDAL:
                 f"Database error while fetching password hash: {e}") from e
 
     async def delete_user(self, conn: pyodbc.Connection, user_id: UUID) -> bool:
-        """Deletes a user by their ID using sp_DeleteUser, processing a single combined debug and result code output."""
-        logger.info(f"DAL: Attempting to delete user with ID: {user_id}")
+        """
+        Deletes a user by their ID by performing a soft delete.
+        This updates the user's email to a unique placeholder and sets their status to 'Disabled'.
+        """
+        logger.info(f"DAL: Attempting soft delete for user with ID: {user_id}")
+
+        # Generate a unique placeholder email to ensure uniqueness after deletion
+        # Format: deleted_<user_id_short_hash>@deleted.invalid
+        unique_suffix = str(user_id).replace("-", "")[:12] # Use part of UUID for uniqueness
+        placeholder_email = f"deleted_{unique_suffix}@{datetime.now().strftime('%Y%m%d%H%M%S')}.invalid"
+        placeholder_username = f"deleted_user_{unique_suffix}"
+        # Generate a placeholder phone number that starts with '2' and is within typical phone number length (e.g., 11-15 digits)
+        # Using a shorter, unique suffix to ensure it fits NVARCHAR(20)
+        phone_suffix = str(user_id).replace("-", "")[-8:] # Use last 8 chars for a shorter unique part
+        placeholder_phone_number = f"2{phone_suffix}"
+
+        # Update SQL to perform soft delete: update email, username, phone number, and status
+        sql = """
+        UPDATE [User]
+        SET
+            Email = ?,
+            UserName = ?,
+            PhoneNumber = ?,
+            Status = 'Disabled'
+        WHERE UserID = ?;
+        """
+        params = (placeholder_email, placeholder_username, placeholder_phone_number, str(user_id))
 
         try:
-            # Use the injected execute_query function
-            # sp_DeleteUser returns a single row result containing OperationResultCode and Debug_Message.
-            result_data = await self.execute_query_func(conn, "{CALL sp_DeleteUser(?)}", (user_id,), fetchone=True)
+            # Use execute_query_func for non-query operations, it returns rows affected for UPDATE/DELETE
+            rows_affected = await self.execute_query_func(conn, sql, params, fetchone=False, fetchall=False)
 
-            logger.debug(
-                f"DAL: sp_DeleteUser for user {user_id} returned: {result_data}")
+            if rows_affected == 0:
+                logger.warning(f"DAL: User {user_id} not found for soft deletion or no rows affected.")
+                raise NotFoundError(f"User with ID {user_id} not found for deletion.")
+            
+            logger.info(f"DAL: User {user_id} soft deleted successfully (rows affected: {rows_affected}). Email set to {placeholder_email}, status set to Disabled.")
+            return True
 
-            # Process the single result row
-            if result_data and isinstance(result_data, dict):
-                # Access OperationResultCode from the constructed dictionary
-                operation_result_code = result_data.get(
-                    'OperationResultCode') if result_data and isinstance(result_data, dict) else None
-                debug_message = result_data.get('Debug_Message') if result_data and isinstance(
-                    result_data, dict) else "No debug message available."
-
-                if operation_result_code == 0:
-                    # conn.commit() # Commit handled by execute_query implicitly if commit=True
-                    logger.info(
-                        f"DAL: User {user_id} deleted successfully (OperationResultCode: 0).")
-                    return True
-                elif operation_result_code == -1:
-                    logger.warning(
-                        f"DAL: User {user_id} not found by sp_DeleteUser (OperationResultCode: -1). Debug: {debug_message}")
-                    # conn.rollback() # Rollback handled by execute_query implicitly on error/non-commit
-                    raise NotFoundError(
-                        f"User with ID {user_id} not found for deletion.")
-                elif operation_result_code == -2:
-                    logger.warning(
-                        f"DAL: User {user_id} could not be deleted due to dependencies (OperationResultCode: -2). Debug: {debug_message}")
-                    # conn.rollback()
-                    # Raise a specific error for dependencies, or a generic Forbidden/DAL error
-                    raise ForbiddenError(
-                        f"Cannot delete user with ID {user_id} due to existing dependencies.")
-                elif operation_result_code == -3:
-                    logger.warning(
-                        f"DAL: User {user_id} was found but DELETE operation failed (OperationResultCode: -3). Debug: {debug_message}")
-                    # conn.rollback()
-                    raise DALError(
-                        f"Database failed to delete user with ID {user_id} (code -3).")
-                elif operation_result_code == -4:
-                    logger.warning(
-                        f"DAL: Database error during sp_DeleteUser's transaction (OperationResultCode: -4). Debug: {debug_message}")
-                    # conn.rollback()
-                    raise DALError(
-                        f"Database transaction error during user deletion for ID {user_id} (code -4).")
-                elif operation_result_code == -90:
-                    logger.warning(
-                        f"DAL: Database error during sp_DeleteUser's initial user check (OperationResultCode: -90). Debug: {debug_message}")
-                    # conn.rollback()
-                    raise DALError(
-                        f"Database error during initial user check for ID {user_id} (code -90).")
-                elif operation_result_code is None:
-                     # Handle case where OperationResultCode was not found in the result
-                     logger.error(
-                         f"DAL: sp_DeleteUser for user {user_id} returned result data but no OperationResultCode. Result: {result_data}")
-                     # conn.rollback()
-                     raise DALError(
-                         f"Database error during user deletion: Missing result code. Result: {result_data}")
-                else:
-                    logger.warning(
-                        f"DAL: sp_DeleteUser for user {user_id} returned an unexpected OperationResultCode: {operation_result_code}. Debug: {debug_message}. Rolling back.")
-                    # conn.rollback()
-                    raise DALError(
-                        f"Database error during user deletion: Unexpected result code {operation_result_code}. Debug: {debug_message}")
-
-        except (NotFoundError, ForbiddenError, DALError) as e:
-             # Catch and re-raise specific exceptions raised above
-             logger.error(
-                 f"DAL: Specific error during user deletion for {user_id}: {e}")
-             # Rollback is handled by execute_query implicitly on exception
-             raise e
+        except NotFoundError as e:
+            logger.error(f"DAL: User soft deletion failed for {user_id}: {e}")
+            raise e
         except pyodbc.Error as e:
-            logger.error(
-                f"DAL: Database error during user deletion for {user_id}: {e}")
-            # Rollback is handled by execute_query implicitly on exception
-            raise DALError(f"Database error during user deletion: {e}") from e
+            logger.error(f"DAL: Database error during user soft deletion for {user_id}: {e}")
+            raise DALError(f"Database error during user soft deletion: {e}") from e
         except Exception as ex:
-            logger.error(
-                f"DAL: Unexpected Python error during user deletion for {user_id}: {ex}")
-            # Rollback is handled by execute_query implicitly on exception
-            raise DALError(
-                f"Unexpected server error during user deletion: {ex}") from ex
-        # No finally block needed for cursor close if using execute_query as it manages cursor.
+            logger.error(f"DAL: Unexpected Python error during user soft deletion for {user_id}: {ex}")
+            raise DALError(f"Unexpected server error during user soft deletion: {ex}") from ex
 
     async def get_system_notifications_by_user_id(self, conn: pyodbc.Connection, user_id: UUID) -> list[dict]:
         """获取某个用户的系统通知列表。"""
