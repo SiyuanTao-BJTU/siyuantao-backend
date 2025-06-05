@@ -218,7 +218,7 @@ class ChatDAL:
         params = (str(user_id), visibility_value, str(user_id), visibility_value, str(conversation_id), str(user_id), str(user_id))
         return await self.execute_non_query_func(conn, sql, params)
 
-    async def get_all_chat_messages_for_admin(self, conn: pyodbc.Connection, page_number: int, page_size: int) -> List[Dict[str, Any]]:
+    async def get_all_chat_messages_for_admin(self, conn: pyodbc.Connection, page_number: int, page_size: int, search_query: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         管理员获取所有聊天消息。
         """
@@ -242,19 +242,41 @@ class ChatDAL:
         JOIN [User] s ON cm.SenderID = s.UserID
         JOIN [User] r ON cm.ReceiverID = r.UserID
         JOIN [Product] p ON cm.ProductID = p.ProductID
-        ORDER BY cm.SendTime DESC
-        OFFSET ? ROWS FETCH NEXT ? ROWS ONLY;
+        WHERE 1 = 1 -- 占位符，方便后续添加 AND 条件
         """
-        params = (offset, page_size)
-        return await self.execute_query_func(conn, sql, params, fetchall=True)
+        params = []
 
-    async def get_total_chat_messages_count_for_admin(self, conn: pyodbc.Connection) -> int:
+        if search_query:
+            # 在内容、发送者用户名、接收者用户名中进行模糊搜索
+            sql += " AND (cm.Content LIKE ? OR s.UserName LIKE ? OR r.UserName LIKE ?)"
+            search_param = f"%{search_query}%"
+            params.extend([search_param, search_param, search_param])
+
+        sql += " ORDER BY cm.SendTime DESC OFFSET ? ROWS FETCH NEXT ? ROWS ONLY;"
+        params.extend([offset, page_size])
+        
+        return await self.execute_query_func(conn, sql, tuple(params), fetchall=True)
+
+    async def get_total_chat_messages_count_for_admin(self, conn: pyodbc.Connection, search_query: Optional[str] = None) -> int:
         """
         管理员获取所有聊天消息的总数。
         """
-        sql = "SELECT COUNT(MessageID) FROM [ChatMessage];"
-        result = await self.execute_query_func(conn, sql, fetchone=True)
-        return result[''] if result else 0 # Adjust based on how pyodbc returns COUNT(*)
+        sql = """
+        SELECT COUNT(cm.MessageID) AS TotalCount
+        FROM [ChatMessage] cm
+        JOIN [User] s ON cm.SenderID = s.UserID
+        JOIN [User] r ON cm.ReceiverID = r.UserID
+        WHERE (cm.SenderVisible = 1 OR cm.ReceiverVisible = 1)
+        """
+        params = []
+
+        if search_query:
+            sql += " AND (cm.Content LIKE ? OR s.UserName LIKE ? OR r.UserName LIKE ?)"
+            search_param = f"%{search_query}%"
+            params.extend([search_param, search_param, search_param])
+
+        result = await self.execute_query_func(conn, sql, tuple(params), fetchone=True)
+        return result['TotalCount'] if result and 'TotalCount' in result else 0 # Adjust based on how pyodbc returns COUNT(*)
 
     async def get_messages_between_users_for_product(self, conn: pyodbc.Connection, user1_id: UUID, user2_id: UUID, product_id: UUID) -> List[Dict[str, Any]]:
         """
@@ -353,35 +375,4 @@ class ChatDAL:
         """
         sql = "DELETE FROM [ChatMessage] WHERE MessageID = ?;"
         params = (str(message_id),)
-        return await self.execute_non_query_func(conn, sql, params)
-
-    async def get_all_chat_messages_for_admin(self, conn: pyodbc.Connection, page_number: int, page_size: int) -> List[Dict[str, Any]]:
-        """
-        管理员获取所有聊天消息。
-        """
-        offset = (page_number - 1) * page_size
-        sql = """
-        SELECT
-            cm.MessageID AS 消息ID,
-            cm.ConversationIdentifier AS 会话标识符, -- 新增
-            cm.SenderID AS 发送者ID,
-            s.UserName AS 发送者用户名,
-            cm.ReceiverID AS 接收者ID,
-            r.UserName AS 接收者用户名,
-            cm.ProductID AS 商品ID,
-            p.ProductName AS 商品名称,
-            cm.Content AS 消息内容,
-            cm.SendTime AS 发送时间,
-            cm.IsRead AS 是否已读,
-            cm.SenderVisible AS 发送者可见,
-            cm.ReceiverVisible AS 接收者可见
-        FROM [ChatMessage] cm
-        JOIN [User] s ON cm.SenderID = s.UserID
-        JOIN [User] r ON cm.ReceiverID = r.UserID
-        JOIN [Product] p ON cm.ProductID = p.ProductID
-        ORDER BY cm.SendTime DESC
-        OFFSET ? ROWS FETCH NEXT ? ROWS ONLY;
-        """
-        params = (offset, page_size)
-        result = await self.execute_query_func(conn, sql, params, fetchall=True)
-        return result 
+        return await self.execute_non_query_func(conn, sql, params) 

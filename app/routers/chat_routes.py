@@ -1,10 +1,10 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from uuid import UUID
 import pyodbc
 from fastapi import APIRouter, Depends, HTTPException, status, Path, Query
 from app.dependencies import get_db_connection, get_current_authenticated_user, get_chat_service, get_current_active_admin_user
 from app.services.chat_service import ChatService
-from app.schemas.chat_schemas import ChatMessageCreateSchema, ChatMessageResponseSchema, ChatSessionResponseSchema
+from app.schemas.chat_schemas import ChatMessageCreateSchema, ChatMessageResponseSchema, ChatSessionResponseSchema, PaginatedChatMessagesResponseSchema
 from app.exceptions import NotFoundError, ForbiddenError
 
 router = APIRouter()
@@ -102,17 +102,19 @@ async def hide_chat_session(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"隐藏聊天会话失败: {e}")
 
 
-@router.get("/admin/messages", response_model=List[ChatMessageResponseSchema], summary="管理员获取所有聊天消息", response_model_by_alias=False)
+@router.get("/admin/messages", response_model=PaginatedChatMessagesResponseSchema, summary="管理员获取所有聊天消息", response_model_by_alias=False)
 async def get_all_chat_messages_for_admin(
     page_number: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=100, description="每页数量"),
+    search_query: Optional[str] = Query(None, description="搜索查询关键词"),
     current_admin_user: dict = Depends(get_current_active_admin_user), # Requires admin role
     conn: pyodbc.Connection = Depends(get_db_connection),
     chat_service: ChatService = Depends(get_chat_service)
 ):
     try:
-        messages = await chat_service.get_all_messages_for_admin(conn, page_number, page_size)
-        return messages
+        messages_data = await chat_service.get_all_messages_for_admin(conn, page_number, page_size, search_query)
+        # messages_data is already a dictionary { "messages": [...], "total_count": ... }
+        return messages_data
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"管理员获取所有消息失败: {e}")
 

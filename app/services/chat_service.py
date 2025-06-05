@@ -147,19 +147,20 @@ class ChatService:
             pass # Or raise a specific error if hiding a non-existent session is an error.
 
     async def get_all_messages_for_admin(
-        self, conn: pyodbc.Connection, page_number: int = 1, page_size: int = 10
-    ) -> List[ChatMessageResponseSchema]:
+        self, conn: pyodbc.Connection, page_number: int = 1, page_size: int = 10, search_query: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         管理员获取所有聊天消息的业务逻辑。
         """
-        messages_data = await self.chat_dal.get_all_chat_messages_for_admin(conn, page_number, page_size)
+        messages_data = await self.chat_dal.get_all_chat_messages_for_admin(conn, page_number, page_size, search_query)
+        total_count = await self.chat_dal.get_total_chat_messages_count_for_admin(conn, search_query)
         
         formatted_messages = []
         for msg_data in messages_data:
             # DAL already joins user and product names, so directly create schema
             formatted_messages.append(ChatMessageResponseSchema(**msg_data))
         
-        return formatted_messages 
+        return {"messages": formatted_messages, "total_count": total_count}
 
     async def update_single_message_visibility_for_admin(
         self, conn: pyodbc.Connection, message_id: UUID, sender_visible: bool, receiver_visible: bool

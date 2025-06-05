@@ -41,3 +41,12 @@ class ChatSessionResponseSchema(BaseModel):
     class Config:
         from_attributes = True
         populate_by_name = True
+
+# 新增：分页聊天消息响应Schema
+class PaginatedChatMessagesResponseSchema(BaseModel):
+    messages: List[ChatMessageResponseSchema] = Field(..., description="聊天消息列表")
+    total_count: int = Field(..., description="总消息数")
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
