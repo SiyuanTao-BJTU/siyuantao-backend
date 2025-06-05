@@ -78,7 +78,8 @@ CREATE TABLE [Order] (
             'PendingSellerConfirmation', -- 待卖家确认（买家已下单，等待卖家响应）
             'ConfirmedBySeller',         -- 卖家已确认（卖家已同意，商品库存已扣减）
             'Completed',                 -- 订单完成（买家已收货或交易已结束）
-            'Cancelled'                  -- 订单取消（包括线下验货时买家取消）
+            'Cancelled',                 -- 订单取消（包括线下验货时买家取消）
+            'Rejected'                   -- 订单拒绝（卖家拒绝订单）
         )),
     [UpdateTime] DATETIME NOT NULL DEFAULT GETDATE(),       -- 新增：订单更新时间，不允许为空，默认当前系统时间
     [CompleteTime] DATETIME NULL,                           -- 订单完成时间，可为空

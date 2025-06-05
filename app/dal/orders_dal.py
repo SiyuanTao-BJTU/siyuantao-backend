@@ -130,15 +130,9 @@ class OrdersDAL:
     ) -> None:
         """
         Calls the sp_RejectOrder stored procedure for a seller to reject an order.
-        (Assumes sp_RejectOrder might take an optional @RejectionReason parameter)
         """
-        # Adjust SQL and params if @RejectionReason is definitively part of sp_RejectOrder
-        if rejection_reason:
-            sql = "{CALL sp_RejectOrder (?, ?, ?)}"
-            params = (str(order_id), str(seller_id), rejection_reason) # 转换为字符串
-        else:
-            sql = "{CALL sp_RejectOrder (?, ?)}" # Assuming SP handles NULL or has default for reason if not provided
-            params = (str(order_id), str(seller_id)) # 转换为字符串
+        sql = "{CALL sp_RejectOrder (?, ?, ?)}"
+        params = (str(order_id), str(seller_id), rejection_reason)
         
         try:
             # Use the stored generic execution function and pass conn
@@ -147,8 +141,12 @@ class OrdersDAL:
             raise e
         except pyodbc.Error as e:
             error_msg = str(e)
-            # Add specific error code checks for sp_RejectOrder if available
-            # These specific error codes mapping might ideally live in the generic executor
+            if "50001" in error_msg: # 订单不存在
+                raise NotFoundError(f"拒绝订单失败: {error_msg}") from e
+            elif "50002" in error_msg: # 无权拒绝
+                raise ForbiddenError(f"拒绝订单失败: {error_msg}") from e
+            elif "50003" in error_msg: # 状态不正确
+                raise IntegrityError(f"拒绝订单失败: {error_msg}") from e
             raise DALError(f"无法拒绝订单 {order_id}: {error_msg}") from e
         except Exception as e:
             raise DALError(f"拒绝订单 {order_id} 时发生意外错误: {e}") from e

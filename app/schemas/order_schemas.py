@@ -65,3 +65,12 @@ class OrderStatusUpdateSchema(BaseModel):
 
     class Config:
         orm_mode = True
+
+class RejectionReasonSchema(BaseModel):
+    """
+    Schema for providing a rejection reason.
+    """
+    rejection_reason: str = Field(..., min_length=1, description="Reason for rejecting the order.")
+
+    class Config:
+        orm_mode = True

@@ -102,7 +102,7 @@ class OrderService:
         conn: pyodbc.Connection, 
         order_id: UUID, # 修改为 UUID
         user_id: UUID, # Typically seller_id
-        reason: Optional[str] = None # Optional reason for rejection
+        reason: str # Optional reason for rejection
     ) -> OrderResponseSchema:
         try:
             await self.order_dal.reject_order(conn, order_id, user_id, reason)

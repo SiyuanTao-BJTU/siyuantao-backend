@@ -3,7 +3,7 @@
  */
 
 -- sp_CreateOrder: 创建新订单
--- 功能: 验证买家和商品信息，扣减库存，创建订单记录
+-- 功能: 验证买家和商品信息，但不扣减库存，创建订单记录
 DROP PROCEDURE IF EXISTS [sp_CreateOrder];
 GO
 CREATE PROCEDURE [sp_CreateOrder]
@@ -12,15 +12,13 @@ CREATE PROCEDURE [sp_CreateOrder]
     @Quantity INT,
     @TradeTime DATETIME,        -- 新增：交易时间
     @TradeLocation NVARCHAR(255) -- 新增：交易地点
-    -- @NewOrderID_Output UNIQUEIDENTIFIER OUTPUT -- 移除此行
 AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @NewOrderID UNIQUEIDENTIFIER; -- 重新引入局部变量
-    DECLARE @ProductPrice DECIMAL(10, 2); -- 移除：不再需要内部计算商品价格
+    DECLARE @NewOrderID UNIQUEIDENTIFIER;
     DECLARE @ProductStock INT;
     DECLARE @SellerID UNIQUEIDENTIFIER;
-    DECLARE @OrderStatus NVARCHAR(50) = 'PendingSellerConfirmation'; -- 初始状态为待处理
+    DECLARE @OrderStatus NVARCHAR(50) = 'PendingSellerConfirmation';
     DECLARE @ErrorMessage NVARCHAR(4000);
 
     BEGIN TRY
@@ -33,10 +31,9 @@ BEGIN
             THROW 50001, @ErrorMessage, 1;
         END
 
-        -- 获取商品信息并锁定商品行以防止并发问题
+        -- 获取商品信息
         SELECT @ProductStock = Quantity, @SellerID = OwnerID
         FROM [Product]
-        WITH (UPDLOCK) -- 在事务中锁定行，直到事务结束
         WHERE ProductID = @ProductID AND Status = 'Active';
 
         IF @ProductStock IS NULL -- 检查商品是否存在
@@ -52,16 +49,15 @@ BEGIN
             THROW 50003, @ErrorMessage, 1;
         END
 
-        -- 扣减库存
-        EXEC sp_DecreaseProductQuantity @productId = @ProductID, @quantityToDecrease = @Quantity;
-
+        -- 注意：库存将在卖家确认订单时 (sp_ConfirmOrder) 才扣减。
+        
         -- 生成新的 OrderID 并创建订单
-        SET @NewOrderID = NEWID(); -- 赋值给局部变量
+        SET @NewOrderID = NEWID();
         INSERT INTO [Order] (OrderID, BuyerID, SellerID, ProductID, Quantity, TradeTime, TradeLocation, CreateTime, Status)
         VALUES (@NewOrderID, @BuyerID, @SellerID, @ProductID, @Quantity, @TradeTime, @TradeLocation, GETDATE(), @OrderStatus);
 
-        -- 返回新创建的订单ID，显式转换为 NVARCHAR(36)
-        SELECT CAST(@NewOrderID AS NVARCHAR(36)) AS 订单ID; -- 确保通过 SELECT 返回
+        -- 返回新创建的订单ID
+        SELECT CAST(@NewOrderID AS NVARCHAR(36)) AS 订单ID;
 
         COMMIT TRANSACTION;
     END TRY
@@ -75,7 +71,7 @@ END;
 GO
 
 -- sp_ConfirmOrder: 卖家确认订单
--- 功能: 卖家确认订单，订单状态变为 'Confirmed'
+-- 功能: 卖家确认订单，扣减库存，订单状态变为 'ConfirmedBySeller'
 DROP PROCEDURE IF EXISTS [sp_ConfirmOrder];
 GO
 CREATE PROCEDURE [sp_ConfirmOrder]
@@ -86,11 +82,16 @@ BEGIN
     SET NOCOUNT ON;
     DECLARE @CurrentStatus NVARCHAR(50);
     DECLARE @ErrorMessage NVARCHAR(4000);
+    DECLARE @ProductIDToUpdate UNIQUEIDENTIFIER;
+    DECLARE @QuantityToDecrease INT;
+    DECLARE @CurrentStock INT;
 
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        SELECT @CurrentStatus = Status FROM [Order] WHERE OrderID = @OrderID AND SellerID = @SellerID;
+        -- 获取订单信息
+        SELECT @CurrentStatus = Status, @ProductIDToUpdate = ProductID, @QuantityToDecrease = Quantity 
+        FROM [Order] WHERE OrderID = @OrderID AND SellerID = @SellerID;
 
         IF @CurrentStatus IS NULL
         BEGIN
@@ -104,11 +105,27 @@ BEGIN
             THROW 50005, @ErrorMessage, 1;
         END
 
+        -- 获取当前库存并锁定行
+        SELECT @CurrentStock = Quantity 
+        FROM [Product] WITH (UPDLOCK) 
+        WHERE ProductID = @ProductIDToUpdate;
+
+        -- 再次检查库存
+        IF @CurrentStock < @QuantityToDecrease
+        BEGIN
+            SET @ErrorMessage = '确认订单失败：商品库存不足。';
+            THROW 50009, @ErrorMessage, 1;
+        END
+
+        -- 扣减库存
+        EXEC sp_DecreaseProductQuantity @productId = @ProductIDToUpdate, @quantityToDecrease = @QuantityToDecrease;
+
+        -- 更新订单状态
         UPDATE [Order]
-        SET Status = 'ConfirmedBySeller' -- 状态更新
+        SET Status = 'ConfirmedBySeller',
+            UpdateTime = GETDATE()
         WHERE OrderID = @OrderID;
         
-        -- 返回被确认的订单ID
         SELECT @OrderID AS 订单ID, '订单已确认' AS 消息;
 
         COMMIT TRANSACTION;
@@ -180,54 +197,114 @@ BEGIN
 END;
 GO
 
--- sp_RejectOrder: 卖家拒绝订单
--- 功能: 卖家拒绝订单，订单状态变为 'Rejected'，库存需要恢复 (通过触发器实现)
-DROP PROCEDURE IF EXISTS [sp_RejectOrder];
+/*
+ * 交易管理模块 - 订单存储过程
+ */
+
+-- Stored Procedure to Cancel an Order (by buyer)
+IF OBJECT_ID('sp_CancelOrder', 'P') IS NOT NULL
+    DROP PROCEDURE sp_CancelOrder;
 GO
-CREATE PROCEDURE [sp_RejectOrder]
+CREATE PROCEDURE sp_CancelOrder
     @OrderID UNIQUEIDENTIFIER,
-    @SellerID UNIQUEIDENTIFIER,
-    @RejectionReason NVARCHAR(500) NULL
+    @UserID UNIQUEIDENTIFIER,
+    @CancelReason NVARCHAR(255)
 AS
 BEGIN
     SET NOCOUNT ON;
     DECLARE @CurrentStatus NVARCHAR(50);
-    DECLARE @ErrorMessage NVARCHAR(4000);
+    DECLARE @BuyerID UNIQUEIDENTIFIER;
+    DECLARE @SellerID UNIQUEIDENTIFIER;
 
-    BEGIN TRY
-        BEGIN TRANSACTION;
+    -- Check if the order exists and get its current status and buyer/seller ID
+    SELECT @CurrentStatus = Status, @BuyerID = BuyerID, @SellerID = SellerID
+    FROM [Order]
+    WHERE OrderID = @OrderID;
 
-        SELECT @CurrentStatus = Status FROM [Order] WHERE OrderID = @OrderID AND SellerID = @SellerID;
+    IF @CurrentStatus IS NULL
+    BEGIN
+        THROW 50001, '订单不存在。', 1;
+        RETURN;
+    END
 
-        IF @CurrentStatus IS NULL
-        BEGIN
-            SET @ErrorMessage = '拒绝订单失败：订单不存在或您不是该订单的卖家。';
-            THROW 50009, @ErrorMessage, 1;
-        END
+    -- Authorization: either the buyer or the seller can cancel the order
+    IF @UserID != @BuyerID AND @UserID != @SellerID
+    BEGIN
+        THROW 50002, '您无权取消此订单。', 1;
+        RETURN;
+    END
 
-        IF @CurrentStatus != 'PendingSellerConfirmation'
-        BEGIN
-            SET @ErrorMessage = '拒绝订单失败：订单状态不是"待处理"，无法拒绝。当前状态：' + @CurrentStatus;
-            THROW 50010, @ErrorMessage, 1;
-        END
+    -- Check if the order is in a cancellable state
+    IF @CurrentStatus NOT IN ('PendingSellerConfirmation', 'ConfirmedBySeller')
+    BEGIN
+        THROW 50003, '此订单状态无法被取消。', 1;
+        RETURN;
+    END
 
-        UPDATE [Order]
-        SET Status = 'Cancelled', CancelTime = GETDATE(), CancelReason = ISNULL(@RejectionReason, 'No reason provided.')
-        WHERE OrderID = @OrderID;
-        
-        SELECT @OrderID AS 订单ID, '订单已取消' AS 消息; 
+    -- Update the order status
+    UPDATE [Order]
+    SET
+        Status = 'Cancelled',
+        CancelTime = GETDATE(),
+        CancelReason = @CancelReason,
+        UpdateTime = GETDATE()
+    WHERE OrderID = @OrderID;
 
-        -- 库存恢复逻辑已移至触发器 tr_Order_AfterCancel_RestoreQuantity (假设 Rejected 和 Cancelled 都触发库存恢复)
-        -- 如果 Rejected 状态的库存恢复逻辑不同，需要单独的触发器或在此处处理。
-        -- 根据设计文档，tr_Order_AfterCancel_RestoreQuantity 应该处理 'Cancelled' 和 'Rejected' 状态。
+    -- The trigger tr_Order_AfterCancel_RestoreQuantity will handle restoring product quantity.
+    PRINT '订单已成功取消。';
+END;
+GO
 
-        COMMIT TRANSACTION;
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0
-            ROLLBACK TRANSACTION;
-        THROW;
-    END CATCH
+-- Stored Procedure to Reject an Order (by seller)
+IF OBJECT_ID('sp_RejectOrder', 'P') IS NOT NULL
+    DROP PROCEDURE sp_RejectOrder;
+GO
+CREATE PROCEDURE sp_RejectOrder
+    @OrderID UNIQUEIDENTIFIER,
+    @SellerID UNIQUEIDENTIFIER,
+    @RejectionReason NVARCHAR(255) = NULL -- 理由变为可选
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @CurrentStatus NVARCHAR(50);
+    DECLARE @OrderSellerID UNIQUEIDENTIFIER;
+
+    -- Check if the order exists and get its current status and seller ID
+    SELECT @CurrentStatus = Status, @OrderSellerID = SellerID
+    FROM [Order]
+    WHERE OrderID = @OrderID;
+
+    IF @CurrentStatus IS NULL
+    BEGIN
+        THROW 50001, '订单不存在。', 1;
+        RETURN;
+    END
+
+    -- Authorization: only the seller can reject the order
+    IF @SellerID != @OrderSellerID
+    BEGIN
+        THROW 50002, '您不是该订单的卖家，无权拒绝。', 1;
+        RETURN;
+    END
+
+    -- Check if the order is in a rejectable state
+    IF @CurrentStatus != 'PendingSellerConfirmation'
+    BEGIN
+        THROW 50003, '只有"待卖家确认"的订单才能被拒绝。', 1;
+        RETURN;
+    END
+
+    -- Update the order status
+    UPDATE [Order]
+    SET
+        Status = 'Rejected',
+        CancelTime = GETDATE(), -- Using CancelTime for rejection time as well for simplicity
+        CancelReason = @RejectionReason,
+        UpdateTime = GETDATE()
+    WHERE OrderID = @OrderID;
+
+    -- The trigger tr_Order_AfterCancel_RestoreQuantity will handle restoring product quantity.
+    PRINT '订单已成功拒绝。';
 END;
 GO
 

@@ -5,7 +5,7 @@ import uuid # For User ID and Order ID
 import fastapi
 
 # 假设的Schema路径，请根据您的项目结构调整
-from app.schemas.order_schemas import OrderCreateSchema, OrderResponseSchema, OrderStatusUpdateSchema 
+from app.schemas.order_schemas import OrderCreateSchema, OrderResponseSchema, OrderStatusUpdateSchema, RejectionReasonSchema 
 # 假设的Service和依赖路径，请根据您的项目结构调整
 from app.services.order_service import OrderService
 from app.dependencies import get_current_authenticated_user, get_db_connection, get_order_service, get_current_active_admin_user 
@@ -322,8 +322,7 @@ async def reject_order_route(
     order_id: uuid.UUID = Path(..., title="The ID of the order to reject"),
     current_user: dict = Depends(get_current_authenticated_user),
     conn: pyodbc.Connection = Depends(get_db_connection),
-    order_service: OrderService = Depends(get_order_service),
-    rejection_reason_data: dict = Body(..., embed=True) # Assuming reason is in body
+    order_service: OrderService = Depends(get_order_service)
 ):
     """
     拒绝一个订单。
@@ -332,13 +331,10 @@ async def reject_order_route(
     if not user_id_str:
         raise HTTPException(status_code=fastapi.status.HTTP_401_UNAUTHORIZED, detail="无法获取当前用户信息")
 
-    rejection_reason = rejection_reason_data.get("rejection_reason")
-    if not rejection_reason:
-        raise HTTPException(status_code=fastapi.status.HTTP_400_BAD_REQUEST, detail="拒绝原因不能为空")
-
     try:
         user_id = user_id_str # 直接使用 UUID 对象
-        updated_order = await order_service.reject_order(conn, order_id, user_id, rejection_reason)
+        # 理由是可选的，所以我们传递 None
+        updated_order = await order_service.reject_order(conn, order_id, user_id, reason=None)
         return updated_order
     except IntegrityError as e:
         raise HTTPException(status_code=fastapi.status.HTTP_409_CONFLICT, detail=str(e))

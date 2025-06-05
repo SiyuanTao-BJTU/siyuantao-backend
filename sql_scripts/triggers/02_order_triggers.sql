@@ -13,19 +13,19 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- 检查订单状态是否从非 'Cancelled'/'Rejected' 变为 'Cancelled' 或 'Rejected'
+    -- 检查订单状态是否从 'ConfirmedBySeller' 变为 'Cancelled' 或 'Rejected'
     IF UPDATE(Status)
     BEGIN
-        BEGIN TRY -- 添加 TRY 块
+        BEGIN TRY
             UPDATE P
             SET P.Quantity = P.Quantity + i.Quantity
             FROM [Product] P
             JOIN inserted i ON P.ProductID = i.ProductID
             JOIN deleted d ON i.OrderID = d.OrderID
-            WHERE i.Status = 'Cancelled' -- 新状态是取消
-            AND d.Status != 'Cancelled'; -- 旧状态不是取消 (避免重复恢复)
+            WHERE i.Status IN ('Cancelled', 'Rejected') -- 新状态是取消或拒绝
+            AND d.Status = 'ConfirmedBySeller'; -- 旧状态必须是"卖家已确认"
         END TRY
-        BEGIN CATCH -- 添加 CATCH 块
+        BEGIN CATCH
             THROW; -- 传播错误，导致触发语句的事务回滚
         END CATCH
     END
