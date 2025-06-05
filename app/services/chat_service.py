@@ -8,6 +8,7 @@ import uuid # For generating ConversationIdentifier
 from app.dal.chat_dal import ChatDAL
 from app.dal.user_dal import UserDAL
 from app.dal.product_dal import ProductDAL 
+from app.dal.transaction import transaction # Import the transaction context manager
 
 from app.schemas.chat_schemas import ChatMessageResponseSchema, ChatSessionResponseSchema
 from app.exceptions import NotFoundError, ForbiddenError
@@ -30,33 +31,35 @@ class ChatService:
     async def create_message(
         self, conn: pyodbc.Connection, sender_id: UUID, receiver_id: UUID, product_id: UUID, content: str
     ) -> ChatMessageResponseSchema:
-        sender_user = await self.user_dal.get_user_by_id(conn, sender_id)
-        if not sender_user:
-            raise NotFoundError(f"发送者用户ID {sender_id} 不存在。")
-        
-        receiver_user = await self.user_dal.get_user_by_id(conn, receiver_id)
-        if not receiver_user:
-            raise NotFoundError(f"接收者用户ID {receiver_id} 不存在。")
+        # Start a database transaction for the entire message creation process
+        async with transaction(conn):
+            sender_user = await self.user_dal.get_user_by_id(conn, sender_id)
+            if not sender_user:
+                raise NotFoundError(f"发送者用户ID {sender_id} 不存在。")
             
-        product = await self.product_dal.get_product_by_id(conn, product_id)
-        if not product:
-            raise NotFoundError(f"商品ID {product_id} 不存在。")
+            receiver_user = await self.user_dal.get_user_by_id(conn, receiver_id)
+            if not receiver_user:
+                raise NotFoundError(f"接收者用户ID {receiver_id} 不存在。")
+                
+            product = await self.product_dal.get_product_by_id(conn, product_id)
+            if not product:
+                raise NotFoundError(f"商品ID {product_id} 不存在。")
 
-        message_id = uuid.uuid4()
-        new_message_data = await self.chat_dal.create_chat_message(
-            conn, message_id, sender_id, receiver_id, product_id, content
-        )
-        
-        # After sending a new message, ensure the session is visible for both participants
-        await self.chat_dal.mark_session_messages_invisible(conn, sender_id, receiver_id, product_id, visible=True)
-        await self.chat_dal.mark_session_messages_invisible(conn, receiver_id, sender_id, product_id, visible=True)
-        
-        # Populate sender/receiver/product names for the response schema
-        new_message_data['发送者用户名'] = sender_user.get('用户名')
-        new_message_data['接收者用户名'] = receiver_user.get('用户名')
-        new_message_data['商品名称'] = product.get('商品名称')
+            message_id = uuid.uuid4()
+            new_message_data = await self.chat_dal.create_chat_message(
+                conn, message_id, sender_id, receiver_id, product_id, content
+            )
+            
+            # After sending a new message, ensure the session is visible for both participants
+            await self.chat_dal.mark_session_messages_invisible(conn, sender_id, receiver_id, product_id, visible=True)
+            await self.chat_dal.mark_session_messages_invisible(conn, receiver_id, sender_id, product_id, visible=True)
+            
+            # Populate sender/receiver/product names for the response schema
+            new_message_data['发送者用户名'] = sender_user.get('用户名')
+            new_message_data['接收者用户名'] = receiver_user.get('用户名')
+            new_message_data['商品名称'] = product.get('商品名称')
 
-        return ChatMessageResponseSchema(**new_message_data)
+            return ChatMessageResponseSchema(**new_message_data)
 
     async def get_messages_for_session(self, conn: pyodbc.Connection, current_user_id: UUID, other_user_id: UUID, product_id: UUID) -> List[ChatMessageResponseSchema]:
         # First, mark messages as read if the current user is the receiver and they are unread
@@ -97,25 +100,28 @@ class ChatService:
         print(f"ChatService: get_chat_sessions_for_user - sessions_data from DAL: {sessions_data}")
         if not sessions_data:
             print(f"ChatService: No chat sessions found for user {user_id}.")
-            return [] # Return empty list if no sessions
+            return []
 
         formatted_sessions = []
-        for session in sessions_data:
-            other_user_id = session['对方用户ID']
-            product_id = session['相关商品ID']
+        for session_dict in sessions_data:
+            # DAL query should now provide:
+            # 对方用户名, 对方头像URL, 相关商品名称, 相关商品图片URL
+            # So, no need for separate DB calls for these here.
 
-            other_user_details = await self.user_dal.get_user_by_id(conn, other_user_id)
-            product_details = await self.product_dal.get_product_by_id(conn, product_id)
-
-            session['对方用户名'] = other_user_details.get('用户名') if other_user_details else '未知用户'
-            session['对方头像URL'] = other_user_details.get('头像URL') if other_user_details else None # Assuming UserDAL provides AvatarUrl
-            session['相关商品名称'] = product_details.get('商品名称') if product_details else '未知商品'
-            session['相关商品图片URL'] = product_details.get('商品图片URL') if product_details else None # 新增商品图片URL
-            
-            # The session_id here should be the ConversationIdentifier
-            session['会话ID'] = session['会话ID'] # Already populated by DAL's SQL as ConversationIdentifier
-
-            formatted_sessions.append(ChatSessionResponseSchema(**session))
+            # Ensure all keys for ChatSessionResponseSchema are present or have defaults
+            session_dict_for_schema = {
+                '会话ID': session_dict['会话ID'],
+                '对方用户ID': session_dict['对方用户ID'],
+                '对方用户名': session_dict.get('对方用户名', '未知用户'),
+                '对方头像URL': session_dict.get('对方头像URL'), # Can be None
+                '相关商品ID': session_dict['相关商品ID'],
+                '相关商品名称': session_dict.get('相关商品名称', '未知商品'),
+                '相关商品图片URL': session_dict.get('相关商品图片URL'), # Can be None
+                '最近一条消息': session_dict.get('最近一条消息'),
+                '最近消息时间': session_dict.get('最近消息时间'),
+                '未读消息数': session_dict.get('未读消息数', 0)
+            }
+            formatted_sessions.append(ChatSessionResponseSchema(**session_dict_for_schema))
         
         return formatted_sessions
 

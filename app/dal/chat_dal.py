@@ -22,8 +22,8 @@ class ChatDAL(BaseDAL):
         # Combine sorted user IDs and product ID
         unique_string = f"{sorted_user_ids[0]}-{sorted_user_ids[1]}-{product_id}"
         
-        # Use SHA-1 hash to create a consistent UUID
-        hash_object = hashlib.sha1(unique_string.encode())
+        # Use SHA-256 hash to create a consistent UUID (consistent with ChatService)
+        hash_object = hashlib.sha256(unique_string.encode('utf-8')) # Changed to sha256
         hex_dig = hash_object.hexdigest()
         conversation_uuid = UUID(hex_dig[:32])
         print(f"ChatDAL: _generate_conversation_id generated: {conversation_uuid} for {unique_string}")
@@ -44,6 +44,15 @@ class ChatDAL(BaseDAL):
         params = (str(message_id), str(conversation_id), str(sender_id), str(receiver_id), str(product_id), content)
         await self._execute_non_query(conn, sql, params)
         
+        # DEBUG: Verify message insertion
+        check_sql = "SELECT COUNT(*) AS count FROM [ChatMessage] WHERE MessageID = ?"
+        check_params = (str(message_id),)
+        check_result = await self._execute_query(conn, check_sql, check_params, fetchone=True)
+        if check_result and check_result['count'] == 1:
+            print(f"ChatDAL: Verified message {message_id} inserted successfully.")
+        else:
+            print(f"ChatDAL: WARNING - Message {message_id} might not have been inserted. Check result: {check_result}")
+
         # 返回创建的消息的完整详情，包括关联的用户和商品信息
         return await self.get_message_by_id(conn, message_id)
 
@@ -101,55 +110,74 @@ class ChatDAL(BaseDAL):
         LEFT JOIN [User] r ON cm.ReceiverID = r.UserID
         LEFT JOIN [Product] p ON cm.ProductID = p.ProductID
         WHERE cm.ConversationIdentifier = ?
-          AND (cm.SenderVisible = 1 AND cm.ReceiverVisible = 1) -- Both must be visible to be retrieved in general chat history
+          AND (
+                (cm.SenderID = ? AND cm.SenderVisible = 1) OR -- Message is visible to current user as sender
+                (cm.ReceiverID = ? AND cm.ReceiverVisible = 1) -- Message is visible to current user as receiver
+              )
         ORDER BY cm.SendTime ASC;
         """
-        params = (str(conversation_id),)
+        params = (str(conversation_id), str(user_id), str(user_id)) # Added user_id twice for visibility check
         return await self._execute_query(conn, sql, params, fetchall=True)
 
     async def get_chat_sessions_for_user(self, conn: pyodbc.Connection, user_id: UUID) -> List[Dict[str, Any]]:
         """
-        获取某个用户的所有聊天会话列表，包括每个会话的最新消息和未读消息数量。
-        这里需要复杂的SQL来处理聚合和排序。
-        利用 ConversationIdentifier 进行优化。
+        获取某个用户的所有聊天会话列表，包括每个会话的最新消息、未读消息数量、对方用户信息和商品图片。
         """
         sql = """
-        WITH UserMessages AS (
+        WITH LatestMessages AS (
             SELECT
-                cm.MessageID,
                 cm.ConversationIdentifier,
                 cm.SenderID,
                 cm.ReceiverID,
                 cm.ProductID,
-                cm.Content,
-                cm.SendTime,
-                cm.IsRead,
-                cm.SenderVisible,
-                cm.ReceiverVisible,
+                cm.Content AS LatestMessageContent,
+                cm.SendTime AS LatestMessageTime,
+                cm.IsRead, -- Keep IsRead for potential use, though unread count is separate
                 ROW_NUMBER() OVER (PARTITION BY cm.ConversationIdentifier ORDER BY cm.SendTime DESC) as rn
             FROM ChatMessage cm
             WHERE (cm.SenderID = ? AND cm.SenderVisible = 1) OR (cm.ReceiverID = ? AND cm.ReceiverVisible = 1)
+        ),
+        UnreadCounts AS (
+            SELECT
+                ConversationIdentifier,
+                COUNT(MessageID) as UnreadMessageCount
+            FROM ChatMessage
+            WHERE ReceiverID = ? AND IsRead = 0
+                  AND ((SenderID = ? AND SenderVisible = 1) OR (ReceiverID = ? AND ReceiverVisible = 1)) -- Ensure messages are visible to current user
+            GROUP BY ConversationIdentifier
         )
         SELECT
-            MessageID,
-            ConversationIdentifier,
-            SenderID,
-            ReceiverID,
-            ProductID,
-            Content,
-            SendTime,
-            IsRead,
-            SenderVisible,
-            ReceiverVisible
-        FROM UserMessages;
+            lm.ConversationIdentifier AS 会话ID,
+            CASE
+                WHEN lm.SenderID = ? THEN lm.ReceiverID
+                ELSE lm.SenderID
+            END AS 对方用户ID,
+            ou.UserName AS 对方用户名,
+            ou.AvatarUrl AS 对方头像URL,
+            lm.ProductID AS 相关商品ID,
+            p.ProductName AS 相关商品名称,
+            -- Prefer the ProductImage with SortOrder 1 if available
+            (SELECT TOP 1 pi.ImageUrl FROM ProductImage pi WHERE pi.ProductID = p.ProductID ORDER BY pi.SortOrder ASC) AS 相关商品图片URL,
+            lm.LatestMessageContent AS 最近一条消息,
+            lm.LatestMessageTime AS 最近消息时间,
+            COALESCE(uc.UnreadMessageCount, 0) AS 未读消息数
+        FROM LatestMessages lm
+        JOIN [User] ou ON ou.UserID = (CASE WHEN lm.SenderID = ? THEN lm.ReceiverID ELSE lm.SenderID END)
+        JOIN [Product] p ON p.ProductID = lm.ProductID
+        LEFT JOIN UnreadCounts uc ON lm.ConversationIdentifier = uc.ConversationIdentifier
+        WHERE lm.rn = 1
+        ORDER BY lm.LatestMessageTime DESC;
         """
-        # Params: (user_id for SenderID filter, user_id for ReceiverID filter)
-        params = (str(user_id), str(user_id))
-        print(f"ChatDAL: get_chat_sessions_for_user SQL (Simplified for Debugging): {sql}")
-        print(f"ChatDAL: get_chat_sessions_for_user Params (Simplified for Debugging): {params}")
-        result = await self._execute_query(conn, sql, params, fetchall=True)
-        print(f"ChatDAL: get_chat_sessions_for_user Result (Simplified for Debugging): {result}")
-        return result
+        # Parameters:
+        # For LatestMessages WHERE: user_id, user_id
+        # For UnreadCounts WHERE ReceiverID: user_id
+        # For UnreadCounts WHERE (SenderID OR ReceiverID): user_id, user_id
+        # For SELECT CASE (SenderID): user_id
+        # For JOIN [User] ou ON (CASE WHEN lm.SenderID): user_id
+        params = (user_id, user_id, user_id, user_id, user_id, user_id, user_id)
+        # logging.debug(f"ChatDAL: get_chat_sessions_for_user SQL (Optimized): \n{sql}")
+        # logging.debug(f"ChatDAL: get_chat_sessions_for_user Params (Optimized): {params}")
+        return await self._execute_query(conn, sql, params, fetchall=True)
 
     async def mark_messages_read(self, conn: pyodbc.Connection, user_id: UUID, message_ids: List[UUID]) -> int:
         """

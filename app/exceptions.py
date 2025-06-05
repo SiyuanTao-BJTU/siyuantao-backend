@@ -11,6 +11,9 @@ class DALError(Exception):
         self.message = message
         self.detail = detail if detail is not None else message # Ensure detail is not None
 
+    def __str__(self):
+        return self.detail or self.message # Return detail if present, else message
+
 class NotFoundError(DALError):
     """
     Custom exception for resource not found errors within the DAL.
@@ -18,10 +21,16 @@ class NotFoundError(DALError):
     def __init__(self, message="Resource not found"):
         super().__init__(message)
 
+    def __str__(self):
+        return self.message
+
 class IntegrityError(DALError):
     """Raised when a database integrity constraint is violated (e.g., duplicate unique key)."""
     def __init__(self, message="Integrity constraint violation"):
         super().__init__(message)
+
+    def __str__(self):
+        return self.message
 
 # ... 您可以根据业务需求添加更多特定异常，例如 AuthorizationError, ValidationError (for business logic)
 
@@ -30,6 +39,9 @@ class DatabaseError(DALError):
     def __init__(self, message="Database error"):
         super().__init__(message)
 
+    def __str__(self):
+        return self.message
+
 class EmailSendingError(Exception):
     """Raised when there is an error sending email."""
     def __init__(self, message="Email sending failed", detail=None):
@@ -37,11 +49,17 @@ class EmailSendingError(Exception):
         self.detail = detail
         super().__init__(self.message)
 
+    def __str__(self):
+        return self.detail or self.message
+
 class AuthenticationError(Exception):
     """Raised when authentication fails."""
     def __init__(self, message="Authentication failed"):
         self.message = message
         super().__init__(self.message)
+
+    def __str__(self):
+        return self.message
 
 class ForbiddenError(Exception):
     """Raised when a user is forbidden from accessing a resource or performing an action."""
@@ -49,17 +67,26 @@ class ForbiddenError(Exception):
         self.message = message
         super().__init__(self.message)
 
+    def __str__(self):
+        return self.message
+
 class PermissionError(Exception):
     """Raised when a user does not have permission to perform an action on a resource."""
     def __init__(self, message="Permission denied"):
         self.message = message
         super().__init__(self.message)
 
+    def __str__(self):
+        return self.message
+
 class InternalServerError(Exception):
     """Raised for unexpected internal server errors."""
     def __init__(self, message="Internal server error"):
         self.message = message
         super().__init__(self.message)
+
+    def __str__(self):
+        return self.message
 
 # FastAPI 异常处理器 - 确保将 DAL 异常转换为标准 HTTP 响应
 async def not_found_exception_handler(request: Request, exc: NotFoundError):
@@ -103,7 +130,7 @@ SQLSTATE_ERROR_MAP = {
     '23503': IntegrityError, # Foreign Key Violation
     '23505': IntegrityError, # Unique Violation
     # 可以在这里添加更具体的 SQL Server 错误码
-    # 例如，对于重复键错误，SQL Server 可能是 2627 或 2601
+    # 例如对于重复键错误，SQL Server 可能是 2627 或 2601
     '2627': IntegrityError, # Unique constraint violation (SQL Server)
     '2601': IntegrityError, # Cannot insert duplicate key (SQL Server)
 } 

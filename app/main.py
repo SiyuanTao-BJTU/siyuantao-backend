@@ -1,9 +1,10 @@
 # app/main.py
-from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
+from typing import Optional # Import Optional
 from app.exceptions import (
     NotFoundError, IntegrityError, DALError,
     not_found_exception_handler, integrity_exception_handler, dal_exception_handler,
@@ -198,6 +199,63 @@ app.mount("/uploads", StaticFiles(directory=os.path.abspath(os.path.join(os.path
 @app.get("/")
 async def root():
     return {"message": "Welcome to the Campus Exchange API!"}
+
+# WebSocket Connection Manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: dict[str, WebSocket] = {} # Store user_id: WebSocket
+
+    async def connect(self, user_id: str, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections[user_id] = websocket
+        logger.info(f"WebSocket connected for user: {user_id}, client: {websocket.client}")
+
+    def disconnect(self, user_id: str, websocket: WebSocket):
+        # Ensure we are removing the correct websocket instance if user_id could have multiple (though unlikely with this dict structure)
+        if self.active_connections.get(user_id) == websocket:
+            del self.active_connections[user_id]
+            logger.info(f"WebSocket disconnected for user: {user_id}, client: {websocket.client}")
+
+    async def send_personal_message(self, message: str, user_id: str):
+        if user_id in self.active_connections:
+            try:
+                await self.active_connections[user_id].send_text(message)
+                logger.debug(f"Sent message to user {user_id}: {message}")
+            except Exception as e:
+                logger.error(f"Error sending message to user {user_id} via WebSocket: {e}")
+        else:
+            logger.warning(f"No active WebSocket connection for user {user_id} to send message.")
+
+    async def broadcast(self, message: str, exclude_user_id: Optional[str] = None):
+        for user_id, connection in self.active_connections.items():
+            if user_id == exclude_user_id:
+                continue
+            try:
+                await connection.send_text(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting to user {user_id} via WebSocket: {e}")
+
+chat_manager = ConnectionManager()
+
+@app.websocket("/ws/chat/{user_id}/")
+async def websocket_chat_endpoint(websocket: WebSocket, user_id: str):
+    # TODO: Add authentication for WebSocket connection (e.g., token in query param)
+    await chat_manager.connect(user_id, websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            logger.info(f"WebSocket received from user {user_id}: {data}")
+            # Example: Echo message back to the sender for now
+            # In a real app, you'd process `data` (e.g., if it's a new chat message from this user)
+            # Then, you might find the recipient and use `send_personal_message` to send it to them.
+            await chat_manager.send_personal_message(f"Echo: You said: {data}", user_id)
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket WebSocketDisconnect for user: {user_id}")
+    except Exception as e:
+        logger.error(f"Unexpected error in WebSocket for user {user_id}: {e}", exc_info=True)
+    finally:
+        chat_manager.disconnect(user_id, websocket)
+
 
 # 您可以添加一些启动和关闭事件 (例如，初始化数据库连接池)
 @app.on_event("startup")

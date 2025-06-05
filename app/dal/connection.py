@@ -34,6 +34,7 @@ async def get_db_connection(request: Request):
 
     except HTTPException as http_exc:
         logger.warning(f"HTTPException propagated during DB connection/transaction: {http_exc.status_code} - {http_exc.detail}")
+        logger.error(f"Raw HTTPException object: {repr(http_exc)}")
         raise http_exc
     except pyodbc.Error as db_exc:
         logger.error(f"Database connection or operation error: {db_exc}", exc_info=True)

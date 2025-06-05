@@ -101,6 +101,7 @@ async def execute_non_query(conn: pyodbc.Connection, sql: str, params: tuple = (
         return await loop.run_in_executor(None, lambda: cursor.rowcount)
     except pyodbc.Error as e:
         logger.error(f"DAL execute_non_query error: {e} (SQL: {sql}, Params: {params})")
+        logger.error(f"pyodbc.Error details: SQLSTATE={e.args[0] if e.args else 'N/A'}, Message={e.args[1] if len(e.args) > 1 else 'N/A'}, Raw Error Object: {repr(e)}")
         raise map_db_exception(e) from e
     finally:
         await loop.run_in_executor(None, cursor.close)

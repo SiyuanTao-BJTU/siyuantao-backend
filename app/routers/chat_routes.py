@@ -25,7 +25,9 @@ async def create_chat_message(
     except NotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"创建消息失败: {e}")
+        # Log the full representation of the exception for debugging
+        print(f"Chat Route: Unhandled exception during message creation - {repr(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"创建消息失败: {repr(e)}")
 
 
 @router.get("/sessions", response_model=List[ChatSessionResponseSchema], summary="获取用户聊天会话列表", response_model_by_alias=False)
