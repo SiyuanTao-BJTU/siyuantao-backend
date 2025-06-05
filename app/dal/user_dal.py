@@ -883,17 +883,32 @@ class UserDAL:
         try:
             result = await self.execute_query_func(conn, sql, (user_id, otp_code, expires_at, otp_type), fetchone=True)
             logger.debug(f"DAL: sp_CreateOtpForPasswordReset returned: {result}")
+            logger.debug(f"DAL: Full raw result from SP in create_otp: {result}") # Added for deeper debugging
 
             if result and isinstance(result, dict):
-                operation_result_code = result.get('OperationResultCode')
-                debug_message = result.get('Debug_Message')
+                if '操作结果代码' not in result: # Explicitly check if the key exists
+                    logger.warning(f"DAL: '操作结果代码' key missing in SP result for create_otp: {result}")
+                    raise DALError("Stored procedure result missing '操作结果代码' key.")
 
+                operation_result_code = result.get('操作结果代码') # Changed key to '操作结果代码'
+                debug_message = result.get('消息')
+
+                # Ensure operation_result_code is an integer for robust comparison
+                if operation_result_code is not None:
+                    try:
+                        operation_result_code = int(operation_result_code)
+                    except ValueError:
+                        logger.error(f"DAL: Could not convert OperationResultCode to int: {operation_result_code}")
+                        operation_result_code = -999 # Assign a non-zero value to trigger error handling
+                
+                logger.debug(f"DAL: In create_otp, operation_result_code after conversion: {operation_result_code}, type: {type(operation_result_code)}")
+                
                 if operation_result_code == 0:
                     logger.info(f"DAL: OTP created successfully for user {user_id}.")
                     return result
                 elif operation_result_code == -1:
                     raise NotFoundError(f"User with ID {user_id} not found for OTP creation.")
-                else:
+                else: # This will now catch any non-zero or invalid integer codes, including -99 (from CATCH block in SP)
                     raise DALError(f"Stored procedure error creating OTP: {debug_message}")
             
             logger.error(f"DAL: sp_CreateOtpForPasswordReset returned unexpected result: {result}")
@@ -913,11 +928,20 @@ class UserDAL:
             result = await self.execute_query_func(conn, sql, (email, otp_code), fetchone=True)
             logger.debug(f"DAL: sp_GetOtpDetailsAndValidate returned: {result}")
             
-            if result and isinstance(result, dict) and 'OperationResultCode' in result and result['OperationResultCode'] == -1:
-                # Specific error from SP indicating invalid/expired OTP
-                return None # Indicate not found/invalid OTP
+            if result and isinstance(result, dict) and '操作结果代码' in result: # Changed key to '操作结果代码'
+                op_code = result.get('操作结果代码') # Get the Chinese key
+                if op_code is not None:
+                    try:
+                        op_code = int(op_code) # Cast to int
+                    except ValueError:
+                        logger.error(f"DAL: Could not convert '操作结果代码' to int: {op_code}")
+                        op_code = -999 # Default to an error code
+
+                if op_code == -1: # Use the casted value
+                    # Specific error from SP indicating invalid/expired OTP
+                    return None # Indicate not found/invalid OTP
             elif result and isinstance(result, dict):
-                # Valid OTP details found
+                # Valid OTP details found (if no '操作结果代码' or it's not -1)
                 return result
             else:
                 # Unexpected result from SP
@@ -936,8 +960,16 @@ class UserDAL:
             logger.debug(f"DAL: sp_MarkOtpAsUsed returned: {result}")
 
             if result and isinstance(result, dict):
-                operation_result_code = result.get('OperationResultCode')
-                debug_message = result.get('Debug_Message')
+                operation_result_code = result.get('操作结果代码') # Changed key to '操作结果代码'
+                debug_message = result.get('消息')
+
+                # Ensure operation_result_code is an integer for robust comparison
+                if operation_result_code is not None:
+                    try:
+                        operation_result_code = int(operation_result_code)
+                    except ValueError:
+                        logger.error(f"DAL: Could not convert OperationResultCode to int: {operation_result_code}")
+                        operation_result_code = -999 # Assign a non-zero value to trigger error handling
 
                 if operation_result_code == 0:
                     logger.info(f"DAL: OTP {otp_id} successfully marked as used.")

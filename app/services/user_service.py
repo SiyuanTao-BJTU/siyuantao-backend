@@ -395,7 +395,7 @@ class UserService:
                 raise AuthenticationError("验证码无效或已过期，请重新获取。")
             
             user_id = otp_details.get('用户ID')
-            otp_id = otp_details.get('验证OTP流水号')
+            otp_id = otp_details.get('一次性密码ID')
 
             if not user_id or not otp_id:
                 logger.error(f"DAL error: UserID or OtpID missing from OTP details for email {email}.")
@@ -680,7 +680,7 @@ class UserService:
             raise AuthenticationError("验证码无效或已过期，请重新获取。")
         
         user_id = otp_details.get('用户ID')
-        otp_id = otp_details.get('验证OTP流水号')
+        otp_id = otp_details.get('一次性密码ID')
 
         if not user_id or not otp_id:
             logger.error(f"DAL error: UserID or OtpID missing from OTP details for email {email}.")
@@ -815,7 +815,7 @@ class UserService:
             raise AuthenticationError("验证码无效或已过期，请重新获取。")
         
         user_id = otp_details.get('用户ID')
-        otp_id = otp_details.get('验证OTP流水号')
+        otp_id = otp_details.get('一次性密码ID')
 
         if not user_id or not otp_id:
             logger.error(f"DAL error: UserID or OtpID missing from login OTP details for identifier {identifier}.")
