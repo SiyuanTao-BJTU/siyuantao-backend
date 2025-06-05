@@ -774,7 +774,14 @@ class UserService:
         expires_at = datetime.utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES) # Use OTP_EXPIRE_MINUTES
 
         try:
-            await self.user_dal.create_otp(conn, user_id, otp_code, expires_at, 'Login')
+            await self.user_dal.create_otp(
+                conn,
+                otp_code=otp_code,
+                expires_at=expires_at,
+                otp_type='Login',
+                user_id=user_id,
+                email=email
+            )
             logger.debug(f"Login OTP {otp_code} created for user {user_id}")
         except DALError as e:
             logger.error(f"Database error creating login OTP for {identifier}: {e}")
@@ -816,12 +823,13 @@ class UserService:
         """
         logger.info(f"Attempting to verify login OTP and authenticate for identifier: {identifier}")
 
-        # 1. Get OTP details from DAL and validate
-        logger.debug(f"Calling DAL.get_otp_details for identifier {identifier} with OTP {otp_code}")
-        # get_otp_details currently takes email and otp_code. We need to adapt it.
-        # If identifier is username, we need to first get email.
-        user = None
-        if "@" in identifier:
+        user: Optional[Dict[str, Any]] = None  # 明确初始化为 None
+        email: Optional[str] = None  # 明确初始化为 None
+        user_id: Optional[UUID] = None  # 明确初始化为 None
+
+        is_email_identifier = '@' in identifier
+
+        if is_email_identifier:
             user = await self.user_dal.get_user_by_email_with_password(conn, identifier)
             if not user: raise NotFoundError(f"User with email {identifier} not found.")
             email = identifier
@@ -829,10 +837,15 @@ class UserService:
             user = await self.user_dal.get_user_by_username_with_password(conn, identifier)
             if not user: raise NotFoundError(f"User with username {identifier} not found.")
             email = user.get('邮箱')
-            if not email: raise ValueError("账户未绑定邮箱，无法使用OTP登录。请使用密码登录。")
+            if not email:
+                logger.warning(f"User {identifier} does not have an associated email for OTP login.")
+                raise ValueError("账户未绑定邮箱，无法使用OTP登录。请使用密码登录。")
 
-        otp_details = await self.user_dal.get_otp_details(conn, email, otp_code)
-        logger.debug(f"DAL.get_otp_details returned: {otp_details}")
+        logger.debug(f"verify_login_otp_and_authenticate: user_id={{user_id}}, email={{email}}, otp_code={{otp_code}}")
+
+        # Pass otp_code as the first positional argument, then user_id and email as keyword arguments.
+        # The DAL method get_otp_details expects: (conn, otp_code, user_id=..., email=...)
+        otp_details = await self.user_dal.get_otp_details(conn, otp_code, user_id=user_id, email=email)
 
         if not otp_details:
             logger.warning(f"Login OTP verification failed: Invalid, expired, or used OTP for identifier {identifier}.")
