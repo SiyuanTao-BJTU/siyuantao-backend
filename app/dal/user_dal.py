@@ -136,114 +136,60 @@ class UserDAL:
                 raise DALError(
                     f"User creation failed: Unexpected response from database: {result}")
 
-            # 2. 优先检查是否包含 NewUserID (Assuming this is the primary success indicator from SP)
-            new_user_id = result.get('NewUserID')
+            # Get potential NewUserID, error message, and result code
+            new_user_id_raw = result.get('新用户ID')
+            error_message = result.get('Error') or result.get('Message') or result.get('')
+            result_code = result.get('OperationResultCode')
 
-            if new_user_id:
-                 # If NewUserID is present, consider it success and proceed to validation and fetching full info.
-                 # Message field is ignored as an error in this case.
+            # Prioritize handling explicit error messages from the stored procedure
+            if error_message:
+                logger.debug(f"DAL: sp_CreateUser for {username} returned message: {error_message}")
+                if '用户名已存在' in error_message or 'Duplicate username' in error_message:
+                    raise IntegrityError("Username already exists.")
+                elif '手机号码已存在' in error_message or '手机号已存在' in error_message or 'Duplicate phone' in error_message:
+                    raise IntegrityError("Phone number already exists.")
+                # Handle other potential SP-specific errors
+                raise DALError(
+                    f"Stored procedure error during user creation: {error_message}")
 
-                 # 3. Validate NewUserID is a valid UUID string or UUID object
-                 if not isinstance(new_user_id, UUID):
-                      try:
-                          # Attempt to convert to UUID object
-                          new_user_id = UUID(str(new_user_id))
-                      except (ValueError, TypeError) as e:
-                           logger.error(
-                               f"DAL: Returned NewUserID is not a valid UUID: {new_user_id}. Error: {e}")
-                           raise DALError(
-                               f"User creation failed: Invalid User ID format returned: {new_user_id}") from e
-
-                 logger.info(
-                     f"DAL: User {username} created with NewUserID: {new_user_id}. Fetching full info.")
-
-                 # 4. 获取完整用户信息 using the created ID
-                 # This step is necessary to return the full UserResponseSchema as expected by the service/router
-                 full_user_info = await self.get_user_by_id(conn, new_user_id)
-                 logger.debug(
-                     f"DAL: get_user_by_id for new user {new_user_id} returned: {full_user_info}")
-
-                 if not full_user_info:
-                     # This indicates a subsequent read failed right after creation
-                     logger.error(
-                         f"DAL: Failed to retrieve full user info after creation for ID: {new_user_id}")
-                     raise DALError(
-                         f"Failed to retrieve full user info after creation for ID: {new_user_id}")
-
-                 logger.info(f"DAL: Full info retrieved for new user: {username}")
-                 return full_user_info  # Return the fetched dictionary
-
-            else:
-                # If NewUserID is NOT present, check for explicit error messages or result codes.
-
-                # 5. 检查错误消息或操作结果码
-                error_message = result.get('Error') or result.get(
-                    'Message') or result.get('')
-                # Assuming SP might return this
-                result_code = result.get('OperationResultCode')
-
-                # Check for error messages from SP
-                if error_message:
-                    logger.debug(
-                        f"DAL: sp_CreateUser for {username} returned message: {error_message}")
-                    if '用户名已存在' in error_message or 'Duplicate username' in error_message:
-                        logger.warning(f"DAL: Username {username} already exists")
-                        raise IntegrityError("Username already exists.")
-                    elif '手机号码已存在' in error_message or '手机号已存在' in error_message or 'Duplicate phone' in error_message:
-                        logger.warning(
-                            f"DAL: Phone number {phone_number} already exists")
-                        raise IntegrityError("Phone number already exists.")
-                    # Handle other potential SP-specific errors
-                    logger.error(
-                        f"DAL: Stored procedure error during user creation: {error_message}")
+            # If no explicit error message, check result code if available and non-zero
+            if result_code is not None and result_code != 0:  # Assuming 0 is success
+                logger.error(f"DAL: sp_CreateUser for {username} returned non-zero result code: {result_code}. Result: {result}")
+                # Map result code to specific error if possible, otherwise raise generic DALError
+                if result_code == -1: # Example: User already exists
+                    raise IntegrityError("User already exists (code -1).")
+                else:
                     raise DALError(
-                        f"Stored procedure error during user creation: {error_message}")
+                        f"Stored procedure failed with result code: {result_code}")
 
-                # Check result code if available and no explicit error message
-                if result_code is not None:
-                     if result_code != 0:  # Assuming 0 is success
-                          logger.error(
-                              f"DAL: sp_CreateUser for {username} returned non-zero result code: {result_code}. Result: {result}")
-                          # Map result code to specific error if possible, otherwise raise generic DALError
-                          # Example: User already exists (though messages above should catch this)
-                          if result_code == -1:
-                               raise IntegrityError(
-                                   "User already exists (code -1).")
-                          else:
-                               raise DALError(
-                                   f"Stored procedure failed with result code: {result_code}")
-
-            # 3. 检查是否包含 NewUserID (Assuming this is the primary success indicator from SP)
-            new_user_id = result.get('NewUserID')
-            if not new_user_id:
-                # This could happen if SP executed without explicit error but didn't return the ID as expected
+            # If no explicit error and no non-zero result code, expect NewUserID to be present for success
+            if not new_user_id_raw:
                 logger.error(
-                    f"DAL: sp_CreateUser for {username} completed but did not return NewUserID. Result: {result}")
+                    f"DAL: sp_CreateUser for {username} completed but did not return '新用户ID'. Result: {result}")
                 raise DALError(
                     "User creation failed: User ID not returned from database.")
 
-            # 4. Validate NewUserID is a valid UUID string or UUID object
-            if not isinstance(new_user_id, UUID):
-                 try:
-                     # Attempt to convert to UUID object
-                     new_user_id = UUID(str(new_user_id))
-                 except (ValueError, TypeError) as e:
-                      logger.error(
-                          f"DAL: Returned NewUserID is not a valid UUID: {new_user_id}. Error: {e}")
-                      raise DALError(
-                          f"User creation failed: Invalid User ID format returned: {new_user_id}") from e
+            # Validate and convert NewUserID
+            if not isinstance(new_user_id_raw, UUID):
+                try:
+                    new_user_id = UUID(str(new_user_id_raw))
+                except (ValueError, TypeError) as e:
+                    logger.error(
+                        f"DAL: Returned '新用户ID' is not a valid UUID: {new_user_id_raw}. Error: {e}")
+                    raise DALError(
+                        f"User creation failed: Invalid User ID format returned: {new_user_id_raw}") from e
+            else:
+                new_user_id = new_user_id_raw
 
             logger.info(
-                f"DAL: User {username} created with NewUserID: {new_user_id}. Fetching full info.")
+                f"DAL: User {username} created with '新用户ID': {new_user_id}. Fetching full info.")
 
-            # 5. 获取完整用户信息 using the created ID
-            # This step is necessary to return the full UserResponseSchema as expected by the service/router
+            # 获取完整用户信息 using the created ID
             full_user_info = await self.get_user_by_id(conn, new_user_id)
             logger.debug(
                 f"DAL: get_user_by_id for new user {new_user_id} returned: {full_user_info}")
 
             if not full_user_info:
-                # This indicates a subsequent read failed right after creation
                 logger.error(
                     f"DAL: Failed to retrieve full user info after creation for ID: {new_user_id}")
                 raise DALError(

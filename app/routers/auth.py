@@ -42,7 +42,7 @@ async def register(
     try:
         # Call Service layer function, passing the connection
         created_user = await user_service.create_user(conn, user_data)
-        logger.info(f"API: User {user_data.username} registered successfully. User ID: {created_user.user_id}") # Add logging
+        logger.info(f"API: User {user_data.username} registered successfully. User ID: {created_user.用户ID}") # Changed from .user_id to .用户ID
         return created_user
     except IntegrityError as e:
         logger.warning(f"API: Registration failed for {user_data.username} due to integrity error: {e}") # Add logging
