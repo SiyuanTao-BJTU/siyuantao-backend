@@ -74,12 +74,32 @@ jobs:
           # 目前，我们跳过这一步，假设数据库结构已就绪。
           # 重启 ASGI 应用服务器 (Gunicorn)
           echo "Stopping Gunicorn service 'gunicorn_siyuantao'..."
-          systemctl stop gunicorn_siyuantao || true # 允许停止失败，继续尝试杀死进程
+          # 停止 Gunicorn 服务，并等待其完全停止
+          systemctl stop gunicorn_siyuantao || true
+
           echo "Attempting to free port 8000 if in use..."
-          sudo fuser -k 8000/tcp || true # 强制杀死占用8000端口的进程，如果失败则继续
-          echo "Waiting for 2 seconds to ensure port is free..."
-          sleep 2 # 给系统一点时间来释放端口
+          # 强制杀死占用 8000 端口的进程
+          sudo fuser -k 8000/tcp || true
+          
+          echo "Waiting for port 8000 to be free..."
+          # 等待端口释放，最多等待 10 秒
+          for i in $(seq 1 10); do
+            if ! sudo netstat -tulnp | grep ":8000 "; then
+              echo "Port 8000 is now free."
+              break
+            fi
+            echo "Port 8000 still in use, waiting... ($i/10)"
+            sleep 1
+          done
+
+          # 检查端口是否真的空闲，如果仍然被占用，则报错退出
+          if sudo netstat -tulnp | grep ":8000 "; then
+            echo "Error: Port 8000 is still in use after multiple attempts to free it. Deployment aborted."
+            exit 1
+          fi
+
           echo "Starting Gunicorn service 'gunicorn_siyuantao'..."
+          # 启动 Gunicorn 服务
           systemctl start gunicorn_siyuantao
 
           # 检查服务状态 (可选)
