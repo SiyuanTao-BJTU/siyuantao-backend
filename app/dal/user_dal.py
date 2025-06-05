@@ -128,6 +128,12 @@ class UserDAL:
             result = await self.execute_query_func(conn, sql, (username, hashed_password, phone_number, major), fetchone=True)
             logger.debug(
                 f"DAL: sp_CreateUser for {username} returned raw result: {result}")
+            
+            # NEW DEBUGGING: Log the type and keys of the result
+            logger.debug(f"DAL: Type of result from sp_CreateUser: {type(result)}")
+            if isinstance(result, dict):
+                logger.debug(f"DAL: Keys in result dict: {result.keys()}")
+                logger.debug(f"DAL: Value of '新用户ID' in result: {result.get('新用户ID')}")
 
             # 1. 检查结果是否为 None 或非字典类型
             if not result or not isinstance(result, dict):
@@ -152,7 +158,7 @@ class UserDAL:
                 raise DALError(
                     f"Stored procedure error during user creation: {error_message}")
 
-            # If no explicit error message, check result code if available and non-zero
+            # If no explicit error and no non-zero result code, check result code if available and non-zero
             if result_code is not None and result_code != 0:  # Assuming 0 is success
                 logger.error(f"DAL: sp_CreateUser for {username} returned non-zero result code: {result_code}. Result: {result}")
                 # Map result code to specific error if possible, otherwise raise generic DALError
@@ -783,13 +789,13 @@ class UserDAL:
             logger.error(f"DAL: Error getting user by email {email}: {e}")
             raise DALError(f"Failed to get user by email {email}: {e}") from e
 
-    async def create_otp(self, conn: pyodbc.Connection, user_id: UUID, otp_code: str, expires_at: datetime, otp_type: str) -> dict | None:
-        """DAL: 为指定用户创建并存储 OTP。"""
-        logger.debug(f"DAL: Attempting to create OTP for user {user_id} with type {otp_type}")
-        sql = "{CALL sp_CreateOtpForPasswordReset(?, ?, ?, ?)}"
+    async def create_otp(self, conn: pyodbc.Connection, otp_code: str, expires_at: datetime, otp_type: str, user_id: Optional[UUID] = None, email: Optional[str] = None) -> dict | None:
+        """DAL: 为指定用户/邮箱创建并存储 OTP。"""
+        logger.debug(f"DAL: Attempting to create OTP for user {user_id} / email {email} with type {otp_type}")
+        sql = "{CALL sp_CreateOtp(?, ?, ?, ?, ?)}"
         try:
-            result = await self.execute_query_func(conn, sql, (user_id, otp_code, expires_at, otp_type), fetchone=True)
-            logger.debug(f"DAL: sp_CreateOtpForPasswordReset returned: {result}")
+            result = await self.execute_query_func(conn, sql, (user_id, email, otp_code, expires_at, otp_type), fetchone=True)
+            logger.debug(f"DAL: sp_CreateOtp returned: {result}")
             logger.debug(f"DAL: Full raw result from SP in create_otp: {result}") # Added for deeper debugging
 
             if result and isinstance(result, dict):
@@ -811,28 +817,30 @@ class UserDAL:
                 logger.debug(f"DAL: In create_otp, operation_result_code after conversion: {operation_result_code}, type: {type(operation_result_code)}")
                 
                 if operation_result_code == 0:
-                    logger.info(f"DAL: OTP created successfully for user {user_id}.")
+                    logger.info(f"DAL: OTP created successfully for user {user_id or email}.")
                     return result
                 elif operation_result_code == -1:
-                    raise NotFoundError(f"User with ID {user_id} not found for OTP creation.")
+                    raise NotFoundError(f"User/Email not found for OTP creation. Debug: {debug_message}")
+                elif operation_result_code == -2:
+                    raise ValueError(f"Invalid parameters for OTP creation: {debug_message}")
                 else: # This will now catch any non-zero or invalid integer codes, including -99 (from CATCH block in SP)
                     raise DALError(f"Stored procedure error creating OTP: {debug_message}")
             
-            logger.error(f"DAL: sp_CreateOtpForPasswordReset returned unexpected result: {result}")
+            logger.error(f"DAL: sp_CreateOtp returned unexpected result: {result}")
             raise DALError("Failed to create OTP: Unexpected database response.")
 
-        except (NotFoundError, DALError) as e:
+        except (NotFoundError, DALError, ValueError) as e:
             raise e
         except Exception as e:
-            logger.error(f"DAL: Error creating OTP for user {user_id}: {e}")
+            logger.error(f"DAL: Error creating OTP for user {user_id or email}: {e}")
             raise DALError(f"Database error creating OTP: {e}") from e
 
-    async def get_otp_details(self, conn: pyodbc.Connection, email: str, otp_code: str) -> dict | None:
-        """DAL: 根据邮箱和 OTP 获取 OTP 详情并验证有效性。"""
-        logger.debug(f"DAL: Attempting to get OTP details for email {email} with code {otp_code}")
-        sql = "{CALL sp_GetOtpDetailsAndValidate(?, ?)}"
+    async def get_otp_details(self, conn: pyodbc.Connection, otp_code: str, user_id: Optional[UUID] = None, email: Optional[str] = None) -> dict | None:
+        """DAL: 根据用户ID/邮箱和 OTP 获取 OTP 详情并验证有效性。"""
+        logger.debug(f"DAL: Attempting to get OTP details for user {user_id} / email {email} with code {otp_code}")
+        sql = "{CALL sp_GetOtpDetailsAndValidate(?, ?, ?)}"
         try:
-            result = await self.execute_query_func(conn, sql, (email, otp_code), fetchone=True)
+            result = await self.execute_query_func(conn, sql, (email, otp_code, user_id), fetchone=True)
             logger.debug(f"DAL: sp_GetOtpDetailsAndValidate returned: {result}")
             
             if result and isinstance(result, dict) and '操作结果代码' in result: # Changed key to '操作结果代码'
@@ -855,7 +863,7 @@ class UserDAL:
                 logger.warning(f"DAL: sp_GetOtpDetailsAndValidate returned unexpected type or None: {result}")
                 return None # Treat as not found/invalid
         except Exception as e:
-            logger.error(f"DAL: Error getting OTP details for email {email} with code {otp_code}: {e}")
+            logger.error(f"DAL: Error getting OTP details for user {user_id} / email {email} with code {otp_code}: {e}")
             raise DALError(f"Database error while fetching OTP details: {e}") from e
 
     async def mark_otp_as_used(self, conn: pyodbc.Connection, otp_id: UUID) -> bool:
@@ -910,4 +918,41 @@ class UserDAL:
             return True
         except Exception as e:
             logger.error(f"DAL: Error updating last login time for user {user_id}: {e}")
-            raise DALError(f"Database error updating last login time: {e}") from e 
+            raise DALError(f"Database error updating last login time: {e}") from e
+
+    async def update_user_verification_status(self, conn: pyodbc.Connection, user_id: UUID, is_verified: bool) -> bool:
+        """DAL: 更新用户的邮箱验证状态 (IsVerified)。"""
+        logger.debug(f"DAL: Attempting to update verification status for user ID: {user_id} to {is_verified}")
+        sql = "{CALL sp_UpdateUserVerificationStatus(?, ?)}"
+        params = (user_id, is_verified)
+        try:
+            result = await self.execute_query_func(conn, sql, params, fetchone=True) # sp_UpdateUserVerificationStatus returns a dict
+            logger.debug(f"DAL: sp_UpdateUserVerificationStatus returned: {result}")
+
+            if result and isinstance(result, dict):
+                operation_result_code = result.get('操作结果代码')
+                debug_message = result.get('消息')
+
+                if operation_result_code is not None:
+                    try:
+                        operation_result_code = int(operation_result_code)
+                    except ValueError:
+                        logger.error(f"DAL: Could not convert OperationResultCode to int: {operation_result_code}")
+                        operation_result_code = -999
+                
+                if operation_result_code == 0:
+                    logger.info(f"DAL: User {user_id} verification status updated successfully to {is_verified}.")
+                    return True
+                elif operation_result_code == -1: # User not found from SP
+                    raise NotFoundError(f"User with ID {user_id} not found for verification status update. Debug: {debug_message}")
+                else: # Generic error from SP
+                    raise DALError(f"Stored procedure error updating user verification status: {debug_message}")
+            
+            logger.error(f"DAL: sp_UpdateUserVerificationStatus returned unexpected result: {result}")
+            raise DALError("Failed to update user verification status: Unexpected database response.")
+
+        except (NotFoundError, DALError) as e:
+            raise e
+        except Exception as e:
+            logger.error(f"DAL: Error updating user verification status for user {user_id}: {e}")
+            raise DALError(f"Database error updating user verification status: {e}") from e 

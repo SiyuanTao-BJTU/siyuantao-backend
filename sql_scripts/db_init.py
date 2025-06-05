@@ -348,7 +348,7 @@ def create_admin_users(conn):
     # The database dropping at the start of init_database.py ensures a clean state, so this explicit clear is redundant and causes issues.
 
     admin_users = [
-        {"username": "pxk", "email": "23301132@bjtu.edu.cn", "major": "软件工程", "phone": "13800000001","avatar_url": "/uploads/10f7ab7a-95d2-4476-b2d2-9d31f2c7850e.jpg"},
+        {"username": "pxk", "email": "23301127@bjtu.edu.cn", "major": "软件工程", "phone": "13800000001","avatar_url": "/uploads/10f7ab7a-95d2-4476-b2d2-9d31f2c7850e.jpg"},
         {"username": "cyq", "email": "23301003@bjtu.edu.cn", "major": "计算机科学与技术", "phone": "13800000002"},
         {"username": "cy", "email": "23301002@bjtu.edu.cn", "major": "计算机科学与技术", "phone": "13800000003"},
         {"username": "ssc", "email": "23301011@bjtu.edu.cn", "major": "软件工程", "phone": "13800000004"},

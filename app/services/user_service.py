@@ -318,9 +318,7 @@ class UserService:
     async def request_verification_email(self, conn: pyodbc.Connection, email: str, user_id: Optional[UUID] = None) -> dict:
         """
         请求发送邮箱验证 OTP。
-        如果用户已登录 (user_id 提供), 则更新该用户的验证 OTP。
-        如果用户未登录 (user_id 为 None) 且邮箱已存在, 则更新现有用户的验证 OTP。
-        如果用户未登录且邮箱不存在, 则返回通用成功消息 (出于安全考虑，不暴露用户是否存在)。
+        可以为已登录用户发送，也可以为未登录用户发送（主要用于注册后验证邮箱）。
         """
         logger.info(f"Attempting to request verification OTP for email: {email}, user_id: {user_id}")
 
@@ -328,55 +326,44 @@ class UserService:
             logger.warning(f"Invalid BJTU email format for: {email}")
             raise ValueError("只允许使用北京交通大学邮箱地址进行验证 (@bjtu.edu.cn)")
 
+        otp_code = str(random.randint(100000, 999999)) # Generate a 6-digit OTP
+        expires_at = datetime.utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES)
+        otp_type = 'EmailVerification'
+
+        target_user_id_for_otp = None # Will be UUID if user is found/logged in
+        target_email_for_otp = email # Always use the provided email for the OTP record
+
         try:
-            target_user_info = None
-            if user_id:
-                # User is logged in, try to get user by provided user_id
+            if user_id: # Scenario 1: User is logged in (user_id from token)
                 target_user_info = await self.user_dal.get_user_by_id(conn, user_id)
                 if not target_user_info:
-                    raise NotFoundError(f"User with ID {user_id} not found.")
-            else:
-                # User is not logged in, try to get user by email
-                target_user_info = await self.user_dal.get_user_by_email_with_password(conn, email)
-
-            # If no user is found by either method, return a generic success message
-            if not target_user_info:
-                logger.warning(f"User not found for email {email} when requesting verification OTP. Returning generic success message for security.")
-                return {"message": "如果邮箱存在，您将很快收到一封包含验证码的邮件。"}
-
-            target_user_id = target_user_info.get('用户ID')
-            if not target_user_id: # Should not happen if target_user_info is not None and valid
-                logger.error(f"User info retrieved for email {email} but '用户ID' is missing: {target_user_info}")
-                raise DALError("Failed to retrieve user ID for OTP generation.")
-
-            # Generate OTP
-            otp_code = str(random.randint(100000, 999999)) # Generate a 6-digit OTP
-            expires_at = datetime.utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES)
-
-            # Store OTP
-            # Use the existing create_otp method in UserDAL
-            await self.user_dal.create_otp(conn, target_user_id, otp_code, expires_at, 'EmailVerification')
-            logger.debug(f"OTP {otp_code} created for user {target_user_id}")
+                    # This case should ideally not happen if user is authenticated correctly
+                    logger.warning(f"Authenticated user with ID {user_id} not found when requesting OTP.")
+                    raise NotFoundError(f"用户ID {user_id} 不存在。")
+                target_user_id_for_otp = target_user_info.get('用户ID')
+            
+            # Store OTP using the updated DAL method that accepts user_id and/or email.
+            # If user_id is None, OTP is primarily linked by email. If user_id is provided, it's also linked.
+            await self.user_dal.create_otp(conn, otp_code, expires_at, otp_type, user_id=target_user_id_for_otp, email=target_email_for_otp)
+            logger.debug(f"OTP {otp_code} created for user {target_user_id_for_otp} / email {target_email_for_otp}")
 
             # Send email containing OTP
             email_subject = "思源淘学生身份认证"
-
             template_path = os.path.join(EMAIL_TEMPLATES_DIR, "student_verification_email.html")
             with open(template_path, "r", encoding="utf-8") as f:
                 email_body_template = f.read()
-
             email_body = email_body_template.format(otp_code=otp_code, expire_minutes=settings.OTP_EXPIRE_MINUTES)
 
             logger.debug(f"Sending verification OTP email to {email}")
-            await self.email_sender(email, email_subject, email_body)
+            await self._send_email(email, email_subject, email_body)
             logger.info(f"Verification OTP email sent to {email}")
 
-            return {"message": "验证码已发送，请检查您的邮箱。", "user_id": target_user_id, "is_new_user": False} # is_new_user should be False here as we are sending OTP for an existing user
+            return {"message": "验证码已发送，请检查您的邮箱。", "email": email}
 
         except ValueError as e:
             logger.warning(f"Value error during email request: {e}")
             raise e
-        except NotFoundError as e: # Catch NotFoundError for user_id case
+        except NotFoundError as e: # This would be if user_id was provided but user not found
             logger.warning(f"User not found for provided user_id: {e}")
             raise e
         except DALError as e:
@@ -390,38 +377,66 @@ class UserService:
             raise e
 
     # New method to verify email with OTP
-    async def verify_email_otp(self, conn: pyodbc.Connection, email: str, otp_code: str) -> dict:
+    async def verify_email_otp(self, conn: pyodbc.Connection, email: str, otp_code: str, current_user_id: Optional[UUID] = None) -> dict:
         """
         Service layer function to verify email using OTP.
         """
-        logger.info(f"Attempting to verify email with OTP for email: {email}")
+        logger.info(f"Attempting to verify email with OTP for email: {email}, provided current_user_id: {current_user_id}")
         try:
-            # 1. Get OTP details from DAL and validate
-            otp_details = await self.user_dal.get_otp_details(conn, email, otp_code)
+            # 1. Get OTP details from DAL and validate.
+            # Pass both email and current_user_id to DAL for more flexible OTP lookup.
+            # DAL's sp_GetOtpDetailsAndValidate should handle finding OTP by UserID OR Email.
+            otp_details = await self.user_dal.get_otp_details(conn, otp_code, user_id=current_user_id, email=email)
 
             if not otp_details:
-                logger.warning(f"OTP verification failed: Invalid, expired, or used OTP for email {email}.")
+                logger.warning(f"OTP verification failed: Invalid, expired, or used OTP for email {email} and/or user {current_user_id}.")
                 raise AuthenticationError("验证码无效或已过期，请重新获取。")
             
-            user_id = otp_details.get('用户ID')
+            user_id_from_otp = otp_details.get('用户ID')
+            email_from_otp = otp_details.get('邮箱') # This will be the email the OTP was created with
             otp_id = otp_details.get('一次性密码ID')
 
-            if not user_id or not otp_id:
-                logger.error(f"DAL error: UserID or OtpID missing from OTP details for email {email}.")
-                raise DALError("Failed to retrieve user ID or OTP ID from OTP details.")
+            if not otp_id: # OtpID is mandatory
+                logger.error(f"DAL error: OtpID missing from OTP details for email {email_from_otp} and/or user {user_id_from_otp}.")
+                raise DALError("Failed to retrieve OTP ID from OTP details.")
 
-            # 2. Mark user email as verified
-            await self.user_dal.verify_email(conn, user_id) # Call the updated DAL verify_email
-            logger.info(f"Email marked as verified for user ID: {user_id} after OTP verification.")
+            # Determine the user ID to update.
+            # Priority:
+            # 1. UserID from OTP details (if OTP was explicitly created for a user).
+            # 2. Provided current_user_id (if OTP was created for an email and user is logged in).
+            user_id_to_verify = user_id_from_otp
+            if user_id_to_verify is None and current_user_id is not None: # Check if the OTP was created without a UserID, but the user is logged in
+                user_id_to_verify = current_user_id
+                logger.debug(f"Using provided current_user_id {current_user_id} as user_id_to_verify since OTP was not linked to a specific user.")
+            
+            if user_id_to_verify is None: # If still no user_id_to_verify, it's an error.
+                logger.error(f"Cannot determine user to verify for email {email_from_otp}. UserID from OTP: {user_id_from_otp}, current_user_id: {current_user_id}")
+                raise NotFoundError(f"无法确定要验证的用户账户。")
+
+            # Fetch the user's current profile to update email and verification status
+            current_user_profile_data = await self.user_dal.get_user_by_id(conn, user_id_to_verify)
+            if not current_user_profile_data:
+                logger.error(f"User ID {user_id_to_verify} derived from OTP not found in database for verification update.")
+                raise NotFoundError("验证失败：用户账户不存在或已被删除。")
+
+            # 2. Update user's email and verification status
+            # Only update email if it's currently None or different
+            if current_user_profile_data.get('邮箱') is None or current_user_profile_data.get('邮箱') != email_from_otp:
+                await self.user_dal.update_user_profile(conn, user_id_to_verify, email=email_from_otp) # Update email in User table
+                logger.info(f"User {user_id_to_verify} email updated to {email_from_otp} during verification.")
+
+            # Always mark IsVerified as true
+            await self.user_dal.update_user_verification_status(conn, user_id_to_verify, True)
+            logger.info(f"User {user_id_to_verify} marked as verified.")
 
             # 3. Mark OTP as used
             mark_success = await self.user_dal.mark_otp_as_used(conn, otp_id)
             if not mark_success:
-                logger.warning(f"Failed to mark OTP {otp_id} as used after email verification for user {user_id}.")
+                logger.warning(f"Failed to mark OTP {otp_id} as used after email verification for user {user_id_to_verify}.")
 
-            return {"user_id": user_id, "is_verified": True, "message": "邮箱验证成功。"}
+            return {"user_id": user_id_to_verify, "is_verified": True, "message": "邮箱验证成功。"}
 
-        except (AuthenticationError, DALError) as e:
+        except (AuthenticationError, DALError, NotFoundError, ValueError) as e:
             logger.error(f"Error during email OTP verification for email {email}: {e}")
             raise e
         except Exception as e:

@@ -220,18 +220,27 @@ GO
 -- 存储用于各种验证（如密码重置、登录、邮箱验证）的一次性密码 (OTP)。
 CREATE TABLE [Otp] (
     [OtpID] UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),       -- OTP 唯一标识符，主键
-    [UserID] UNIQUEIDENTIFIER NOT NULL,                         -- 关联的用户ID
+    [UserID] UNIQUEIDENTIFIER NULL,                             -- 关联的用户ID，现在允许为NULL
+    [Email] NVARCHAR(254) NULL,                                 -- 关联的邮箱，新增，允许为NULL
     [OtpCode] NVARCHAR(10) NOT NULL,                            -- OTP 代码（通常是6位数字或字母数字组合）
     [CreationTime] DATETIME NOT NULL DEFAULT GETDATE(),         -- OTP 创建时间
     [ExpiresAt] DATETIME NOT NULL,                              -- OTP 过期时间
     [IsUsed] BIT NOT NULL DEFAULT 0,                            -- OTP 是否已被使用：0=未使用，1=已使用
     [OtpType] NVARCHAR(50) NOT NULL,                            -- OTP 类型 (例如: 'PasswordReset', 'Login', 'EmailVerification')
-    CONSTRAINT FK_Otp_User FOREIGN KEY ([UserID]) REFERENCES [User]([UserID]) ON DELETE CASCADE -- 外键关联用户表，用户删除时相关OTP也删除
+    CONSTRAINT FK_Otp_User FOREIGN KEY ([UserID]) REFERENCES [User]([UserID]) ON DELETE CASCADE, -- 外键关联用户表，用户删除时相关OTP也删除
+    -- 确保 Otp 必须至少关联 UserID 或 Email 中的一个
+    CONSTRAINT CHK_Otp_UserID_Or_Email_NotNull CHECK ([UserID] IS NOT NULL OR [Email] IS NOT NULL)
 );
 GO
 
--- 针对 Otp 表添加筛选唯一索引
+-- 针对 Otp 表添加筛选唯一索引 (当 UserID 不为 NULL 时)
 CREATE UNIQUE INDEX IX_Otp_UserID_OtpType_NotUsed 
 ON [Otp] ([UserID], [OtpType]) 
-WHERE [IsUsed] = 0; -- 同一用户针对同类型OTP只能有一个未使用的记录
+WHERE [IsUsed] = 0 AND [UserID] IS NOT NULL; 
+GO
+
+-- 针对 Otp 表添加筛选唯一索引 (当 Email 不为 NULL 时)
+CREATE UNIQUE INDEX IX_Otp_Email_OtpType_NotUsed 
+ON [Otp] ([Email], [OtpType]) 
+WHERE [IsUsed] = 0 AND [Email] IS NOT NULL;
 GO

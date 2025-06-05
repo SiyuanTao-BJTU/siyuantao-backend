@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 import pyodbc
 from uuid import UUID
+from typing import Optional
 
 from app.schemas.user_schemas import (
     UserRegisterSchema,
@@ -19,7 +20,7 @@ from app.schemas.user_schemas import (
 )
 from app.services.user_service import UserService
 from app.dal.connection import get_db_connection # Import the DB connection dependency
-from app.dependencies import get_user_service # Import the Service dependency
+from app.dependencies import get_user_service, get_current_authenticated_user # Import the Service dependency and get_current_authenticated_user
 from app.exceptions import AuthenticationError, ForbiddenError, IntegrityError, DALError # Import exceptions, including DALError
 
 from fastapi.security import OAuth2PasswordRequestForm # Import OAuth2PasswordRequestForm
@@ -117,9 +118,10 @@ async def login(
 
 @router.post("/request-verification-email", status_code=status.HTTP_200_OK, summary="请求学生身份验证OTP") # Changed summary
 async def request_verification_email_api(
-    request_data: RequestOtpSchema, # Changed schema to RequestOtpSchema
-    conn: pyodbc.Connection = Depends(get_db_connection), # Inject DB connection
-    user_service: UserService = Depends(get_user_service) # Inject Service
+    request_data: RequestOtpSchema,
+    conn: pyodbc.Connection = Depends(get_db_connection),
+    user_service: UserService = Depends(get_user_service),
+    current_user: Optional[dict] = Depends(get_current_authenticated_user) # 可选地注入当前已认证用户
 ):
     """
     请求发送学生身份验证OTP。
@@ -127,7 +129,8 @@ async def request_verification_email_api(
     """
     logger.info(f"API: Received request for student verification OTP for email: {request_data.email}")
     try:
-        result = await user_service.request_verification_email(conn, request_data.email)
+        user_id_from_auth = current_user.get('用户ID') if current_user else None
+        result = await user_service.request_verification_email(conn, request_data.email, user_id=user_id_from_auth)
         return {"message": result.get("message", "如果邮箱存在或已注册，验证码已发送。请检查您的收件箱。")}
     except ValueError as e:
         logger.warning(f"API: Request verification email failed for {request_data.email} due to validation error: {e}")
@@ -153,7 +156,9 @@ async def verify_email_otp_api(
     """
     logger.info(f"API: Received email OTP verification request for email: {verify_data.email}")
     try:
-        verification_result = await user_service.verify_email_otp(conn, verify_data.email, verify_data.otp)
+        # 不需要 current_authenticated_user 依赖，因为用户可能尚未认证或登录。
+        # user_id 从 verify_data.user_id 或者 OTP 记录中获取
+        verification_result = await user_service.verify_email_otp(conn, verify_data.email, verify_data.otp, verify_data.user_id)
         if verification_result and verification_result.get('is_verified') is True:
              return {"message": "邮箱验证成功！您现在可以登录。", "user_id": str(verification_result.get('user_id')), "is_verified": True}
         else:

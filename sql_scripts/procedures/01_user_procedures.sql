@@ -701,35 +701,63 @@ END;
 GO
 
 -- 新增：为密码重置创建并存储 OTP
-DROP PROCEDURE IF EXISTS [sp_CreateOtpForPasswordReset];
+DROP PROCEDURE IF EXISTS [sp_CreateOtp];
 GO
-CREATE PROCEDURE [sp_CreateOtpForPasswordReset]
-    @userId UNIQUEIDENTIFIER,
+CREATE PROCEDURE [sp_CreateOtp]
+    @userId UNIQUEIDENTIFIER = NULL,
+    @email NVARCHAR(254) = NULL,
     @otpCode NVARCHAR(10),
     @expiresAt DATETIME,
-    @otpType NVARCHAR(50) -- 添加新的参数
+    @otpType NVARCHAR(50)
 AS
 BEGIN
     SET NOCOUNT ON;
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        -- 检查用户是否存在
-        IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @userId)
+        -- 确保 UserID 或 Email 至少有一个不为空
+        IF @userId IS NULL AND @email IS NULL
+        BEGIN
+            IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+            SELECT -2 AS 操作结果代码, '必须提供用户ID或邮箱。' AS 消息;
+            RETURN;
+        END
+
+        -- 检查用户是否存在（如果提供了用户ID）
+        IF @userId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @userId)
         BEGIN
             IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
             SELECT -1 AS 操作结果代码, '用户不存在。' AS 消息;
             RETURN;
         END
 
-        -- 首先，将该用户和该 OTP 类型的所有现有未使用的 OTP 标记为已使用
+        -- 检查邮箱是否已注册（如果提供了邮箱）
+        IF @email IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [User] WHERE Email = @email)
+        BEGIN
+            -- 如果是邮箱验证OTP，邮箱可以未注册
+            IF @otpType != 'EmailVerification'
+            BEGIN
+                IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                SELECT -1 AS 操作结果代码, '邮箱未注册。' AS 消息;
+                RETURN;
+            END
+        END
+
+        -- 首先，将与该 OTP 类型关联的所有现有未使用的 OTP 标记为已使用
+        -- 考虑 OTP 可能是通过 UserID 或 Email 关联的
         UPDATE [Otp]
         SET IsUsed = 1
-        WHERE UserID = @userId AND OtpType = @otpType AND IsUsed = 0;
+        WHERE OtpType = @otpType
+          AND IsUsed = 0
+          AND (
+                (@userId IS NOT NULL AND UserID = @userId)
+                OR
+                (@email IS NOT NULL AND Email = @email)
+              );
 
         -- 插入新的 OTP 记录
-        INSERT INTO [Otp] (OtpID, UserID, OtpCode, CreationTime, ExpiresAt, IsUsed, OtpType) -- 包含 OtpType
-        VALUES (NEWID(), @userId, @otpCode, GETDATE(), @expiresAt, 0, @otpType); -- 传入 OtpType 值
+        INSERT INTO [Otp] (OtpID, UserID, Email, OtpCode, CreationTime, ExpiresAt, IsUsed, OtpType)
+        VALUES (NEWID(), @userId, @email, @otpCode, GETDATE(), @expiresAt, 0, @otpType);
 
         COMMIT TRANSACTION;
         SELECT 0 AS 操作结果代码, 'OTP创建成功。' AS 消息;
@@ -745,8 +773,9 @@ GO
 DROP PROCEDURE IF EXISTS [sp_GetOtpDetailsAndValidate];
 GO
 CREATE PROCEDURE [sp_GetOtpDetailsAndValidate]
-    @email NVARCHAR(254),
-    @otpCode NVARCHAR(10)
+    @email NVARCHAR(254) = NULL,
+    @otpCode NVARCHAR(10),
+    @userId UNIQUEIDENTIFIER = NULL -- 新增用户ID参数
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -755,23 +784,27 @@ BEGIN
     SELECT TOP 1
         o.OtpID AS 一次性密码ID,
         o.UserID AS 用户ID,
+        o.Email AS 邮箱, -- 新增
         o.OtpCode AS 一次性密码代码,
         o.CreationTime AS 创建时间,
         o.ExpiresAt AS 过期时间,
         o.IsUsed AS 是否已使用,
-        u.Email AS 邮箱
+        u.UserName AS 用户名 -- 为了方便关联，如果用户存在
     FROM [Otp] o
-    JOIN [User] u ON o.UserID = u.UserID
-    WHERE u.Email = @email
-      AND o.OtpCode = @otpCode
+    LEFT JOIN [User] u ON o.UserID = u.UserID -- 使用 LEFT JOIN 以便在 UserID 为 NULL 时也能获取 OTP 记录
+    WHERE o.OtpCode = @otpCode
       AND o.IsUsed = 0
       AND o.ExpiresAt > @currentUtc
+      AND (
+            (@userId IS NOT NULL AND o.UserID = @userId)
+            OR
+            (@email IS NOT NULL AND o.Email = @email)
+          )
     ORDER BY o.CreationTime DESC; -- 获取最新的有效OTP
 
     -- 如果没有找到有效 OTP，可以返回一个空结果集或一个指示。
     IF @@ROWCOUNT = 0
     BEGIN
-        -- 为了前端逻辑更清晰，这里返回一个特定的OperationResultCode来指示无效或过期
         SELECT -1 AS 操作结果代码, '验证码无效或已过期。' AS 消息;
     END
 END;
@@ -944,6 +977,40 @@ BEGIN
         IF @@TRANCOUNT > 0
             ROLLBACK TRANSACTION;
         THROW; -- 重新抛出捕获的错误
+    END CATCH
+END;
+GO
+
+-- 新增：更新用户邮箱验证状态
+DROP PROCEDURE IF EXISTS [sp_UpdateUserVerificationStatus];
+GO
+CREATE PROCEDURE [sp_UpdateUserVerificationStatus]
+    @userId UNIQUEIDENTIFIER,
+    @isVerified BIT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- 检查用户是否存在
+        IF NOT EXISTS (SELECT 1 FROM [User] WHERE UserID = @userId)
+        BEGIN
+            IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+            SELECT -1 AS 操作结果代码, '用户不存在。' AS 消息;
+            RETURN;
+        END
+
+        UPDATE [User]
+        SET IsVerified = @isVerified
+        WHERE UserID = @userId;
+
+        COMMIT TRANSACTION;
+        SELECT 0 AS 操作结果代码, '用户验证状态更新成功。' AS 消息;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        SELECT -99 AS 操作结果代码, ERROR_MESSAGE() AS 消息;
     END CATCH
 END;
 GO

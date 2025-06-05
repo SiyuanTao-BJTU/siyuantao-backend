@@ -117,6 +117,7 @@ class VerifyOtpAndResetPasswordSchema(BaseModel):
 class VerifyOtpSchema(BaseModel):
     email: EmailStr = Field(..., description="用户邮箱")
     otp: str = Field(..., min_length=6, max_length=6, description="收到的OTP") # Assuming 6-digit OTP
+    user_id: Optional[UUID] = Field(None, description="可选：进行验证的用户ID，用于绑定未验证邮箱的新用户")
 
 # New Schema for requesting OTP for passwordless login
 class RequestLoginOtpSchema(BaseModel):
