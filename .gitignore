@@ -17,5 +17,6 @@ venv/
 # Logs
 *.log
 
+
 # Database
 # Add any database-specific files you don't want to commit, e.g., backup files 
